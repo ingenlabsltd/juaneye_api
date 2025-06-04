@@ -5,52 +5,43 @@ const router = express.Router();
 const { verifyToken } = require('../middleware/authMiddleware');
 const adminController = require('../controllers/adminController');
 
-// ─── Protect all routes below with JWT and Admin-only check ─────────────────
+// Protect everything below with JWT + Admin‐only check
 router.use(verifyToken, (req, res, next) => {
-    // After verifyToken, req.user contains { user_id, email, accountType, ... }
     if (req.user.accountType !== 'Admin') {
         return res.status(403).json({ error: 'Forbidden: Admins only' });
     }
     next();
 });
+
+// ────────── CREATE USER ───────────────────────────────────────────────────────
+router.post('/admin/users', adminController.createUser);
 // ──────────────────────────────────────────────────────────────────────────────
 
-// GET /api/admin/dashboard
-//   → returns high‐level counts and “new signups last 7 days” data
-router.get('/admin/dashboard', adminController.getDashboardStats);
-
-// GET /api/admin/users
-//   → query params: page (default=1), limit (default=10), search (optional, email‐substring filter)
+// LIST USERS (paginated)
 router.get('/admin/users', adminController.listUsers);
 
-// GET /api/admin/users/:userId
-//   → returns a single user’s detail (for “View”)
+// GET ONE USER BY ID
 router.get('/admin/users/:userId', adminController.getUserById);
 
-// PUT /api/admin/users/:userId
-//   → body: { email, accountType, isPremiumUser, scanCount }
-//   → updates those fields on USERS
+// UPDATE A USER
 router.put('/admin/users/:userId', adminController.updateUser);
 
-// DELETE /api/admin/users/:userId
-//   → deletes a user (and cascades deletes in related tables)
+// DELETE A USER
 router.delete('/admin/users/:userId', adminController.deleteUser);
 
-// GET /api/admin/users/:userId/scans
-//   → returns both Object‐type scans and Text‐type scans for that user, sorted by createdAt DESC
+// GET SCANS FOR A USER
 router.get('/admin/users/:userId/scans', adminController.getUserScans);
 
-// PUT /api/admin/scans/:scanId
-//   → body: { type, name, text }
-//   → if type='Object', updates OBJECT_SCANS; if 'Text', updates OCR_SCANS
+// UPDATE A SCAN (OBJECT or OCR)
 router.put('/admin/scans/:scanId', adminController.updateScan);
 
-// DELETE /api/admin/scans/:scanId
-//   → deletes the scan (either from OBJECT_SCANS or OCR_SCANS)
+// DELETE A SCAN (OBJECT or OCR)
 router.delete('/admin/scans/:scanId', adminController.deleteScan);
 
-// GET /api/admin/report?date=YYYY-MM-DD
-//   → returns all users who signed up on that date (with the same fields as listUsers)
+// ADMIN DASHBOARD METRICS
+router.get('/admin/dashboard', adminController.getDashboardStats);
+
+// GENERATE A SIGNUPS REPORT FOR A GIVEN DATE
 router.get('/admin/report', adminController.generateReport);
 
 module.exports = router;

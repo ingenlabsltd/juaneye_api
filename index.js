@@ -14,6 +14,20 @@ dotenv.config();
 
 const app = express();
 app.use(cors());
+
+app.use((req, res, next) => {
+    const now = new Date().toISOString();
+    let userPart = "";
+
+    if (req.user) {
+        userPart = ` user=${req.user.id || req.user.email}`;
+    }
+
+    console.log(`[${now} :: ] ${req.method} ${req.originalUrl}${userPart}`);
+    next();
+});
+
+
 app.use(bodyParser.json());
 
 // 1) Public authentication (no JWT needed)

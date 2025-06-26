@@ -1,85 +1,134 @@
 // controllers/authController.js
-const pool = require('../db');
-const bcrypt = require('bcryptjs');
-const jwt = require('jsonwebtoken');
-const nodemailer = require('nodemailer');
-const dotenv = require('dotenv');
 
+const pool       = require("../db");
+const bcrypt     = require("bcryptjs");
+const jwt        = require("jsonwebtoken");
+const nodemailer = require("nodemailer");
+const dotenv     = require("dotenv");
 dotenv.config();
 
-// Utility: generate a random 6-digit OTP as a string
+// ─── Helpers for OTP flows (unchanged) ───────────────────────────────────────
+
 function generateOTP() {
     return Math.floor(100000 + Math.random() * 900000).toString();
 }
 
-// Utility: send OTP via email
 async function sendOTPEmail(toEmail, codeValue) {
-    // Configure nodemailer transporter
     const transporter = nodemailer.createTransport({
-        host: 'smtp.gmail.com',
+        host: "smtp.gmail.com",
         port: 465,
         secure: true,
         auth: {
             user: process.env.EMAIL_USER,
             pass: process.env.EMAIL_PASS
         },
-        tls: {
-            rejectUnauthorized: false
-        }
+        tls: { rejectUnauthorized: false }
     });
 
-    const mailOptions = {
-        from: 'isproj2.000mailer@gmail.com',
-        to: toEmail,
-        subject: 'Your Password Reset Code',
-        text: `Your OTP code for password reset is: ${codeValue}. It will expire in ${process.env.OTP_EXPIRATION_MINUTES} minutes.`
-    };
-
-    await transporter.sendMail(mailOptions);
+    await transporter.sendMail({
+        from: process.env.EMAIL_USER,
+        to:   toEmail,
+        subject: "Your Password Reset Code",
+        text:    `Your OTP code is: ${codeValue}. Expires in ${process.env.OTP_EXPIRATION_MINUTES} minutes.`
+    });
 }
+
+// ─── Controller exports ─────────────────────────────────────────────────────
 
 module.exports = {
     /**
-     * POST /api/auth/login
-     * Body: { email: string, password: string }
-     * Verifies credentials, returns JWT on success.
+     * POST /api/auth/signup
+     * Body: { email, password }
+     * Creates a new user (email+hashed password) and returns userId + JWT.
      */
-    login: async (req, res, next) => {
+    signup: async (req, res, next) => {
         const { email, password } = req.body;
-
-        // Validate input
         if (!email || !password) {
-            return res.status(400).json({ error: 'Email and password are required.' });
+            return res
+                .status(400)
+                .json({ error: "Email and password are required." });
         }
 
         try {
-            // 1. Fetch the user by email
+            // 1) Check for existing email
             const [rows] = await pool.execute(
-                'SELECT user_id, email, password, accountType FROM USERS WHERE email = ?',
+                "SELECT user_id FROM USERS WHERE email = ?",
                 [email]
             );
-
-            if (rows.length === 0) {
-                return res.status(401).json({ error: 'Invalid email or password.' });
+            if (rows.length > 0) {
+                return res
+                    .status(409)
+                    .json({ error: "That email is already registered." });
             }
 
+            // 2) Hash password & insert
+            const hashed = await bcrypt.hash(password, 10);
+            const [result] = await pool.execute(
+                "INSERT INTO USERS (email, password) VALUES (?, ?)",
+                [email, hashed]
+            );
+            const userId = result.insertId;
+
+            // 3) (Optional) Immediately sign a JWT
+            const token = jwt.sign(
+                { user_id: userId, email },
+                process.env.JWT_SECRET,
+                { expiresIn: "2h" }
+            );
+
+            // 4) Respond
+            return res.status(201).json({
+                message: "Signup successful",
+                userId,
+                token
+            });
+        } catch (err) {
+            return next(err);
+        }
+    },
+
+    /**
+     * POST /api/auth/login
+     * Body: { email, password }
+     * Verifies credentials and returns a JWT.
+     */
+    login: async (req, res, next) => {
+        const { email, password } = req.body;
+        if (!email || !password) {
+            return res
+                .status(400)
+                .json({ error: "Email and password are required." });
+        }
+
+        try {
+            // 1) Fetch user row
+            const [rows] = await pool.execute(
+                "SELECT user_id, password, accountType FROM USERS WHERE email = ?",
+                [email]
+            );
+            if (rows.length === 0) {
+                return res.status(401).json({ error: "Invalid credentials." });
+            }
             const user = rows[0];
 
-            // 2. Compare supplied password with stored hashed password
-            const passwordMatch = await bcrypt.compare(password, user.password);
-            if (!passwordMatch) {
-                return res.status(401).json({ error: 'Invalid email or password.' });
+            // 2) Compare password
+            const match = await bcrypt.compare(password, user.password);
+            if (!match) {
+                return res.status(401).json({ error: "Invalid credentials." });
             }
 
-            // 3. Generate a JWT
-            const payload = {
-                user_id: user.user_id,
-                email: user.email,
-                accountType: user.accountType
-            };
-            const token = jwt.sign(payload, process.env.JWT_SECRET, { expiresIn: '2h' });
+            // 3) Sign JWT
+            const token = jwt.sign(
+                {
+                    user_id:     user.user_id,
+                    email:       user.email,
+                    accountType: user.accountType
+                },
+                process.env.JWT_SECRET,
+                { expiresIn: "2h" }
+            );
 
-            // 4. Respond with token
+            // 4) Respond
             return res.json({ token });
         } catch (err) {
             return next(err);
@@ -88,47 +137,43 @@ module.exports = {
 
     /**
      * POST /api/auth/forgot-password
-     * Body: { email: string }
-     * Generates an OTP and sends it to the user's email.
+     * Body: { email }
+     * Generates and emails a one-time OTP.
      */
     forgotPassword: async (req, res, next) => {
         const { email } = req.body;
-
         if (!email) {
-            return res.status(400).json({ error: 'Email is required.' });
+            return res.status(400).json({ error: "Email is required." });
         }
-
         try {
-            // 1. Check if a user with this email exists
-            const [userRows] = await pool.execute(
-                'SELECT user_id FROM USERS WHERE email = ?',
+            // 1) Lookup user
+            const [users] = await pool.execute(
+                "SELECT user_id FROM USERS WHERE email = ?",
                 [email]
             );
-
-            if (userRows.length === 0) {
-                // We do not reveal whether the email exists or not
-                return res.status(200).json({ message: 'If the email exists, you will receive an OTP.' });
+            if (users.length === 0) {
+                // Don’t reveal existence
+                return res.json({ message: "If that email exists, OTP sent." });
             }
+            const userId = users[0].user_id;
 
-            const userId = userRows[0].user_id;
-
-            // 2. Generate a 6-digit OTP
+            // 2) Create OTP record
             const codeValue = generateOTP();
-
-            // 3. Calculate expiration time based on OTP_EXPIRATION_MINUTES
-            const expirationTime = new Date(Date.now() + parseInt(process.env.OTP_EXPIRATION_MINUTES) * 60000);
-
-            // 4. Insert OTP into OTPS table
+            const expirationTime = new Date(
+                Date.now() +
+                parseInt(process.env.OTP_EXPIRATION_MINUTES, 10) * 60_000
+            );
             await pool.execute(
-                `INSERT INTO OTPS (user_id, codeValue, expirationTime, isUsed, createdAt, updatedAt)
+                `INSERT INTO OTPS 
+           (user_id, codeValue, expirationTime, isUsed, createdAt, updatedAt)
          VALUES (?, ?, ?, FALSE, NOW(), NOW())`,
                 [userId, codeValue, expirationTime]
             );
 
-            // 5. Send the OTP to the user's email
+            // 3) Email it
             await sendOTPEmail(email, codeValue);
 
-            return res.json({ message: 'If the email exists, an OTP has been sent.' });
+            return res.json({ message: "If that email exists, OTP sent." });
         } catch (err) {
             return next(err);
         }
@@ -136,84 +181,72 @@ module.exports = {
 
     /**
      * POST /api/auth/reset-password
-     * Body: { email: string, codeValue: string, newPassword: string }
-     * Validates the OTP and updates the user's password if valid.
+     * Body: { email, codeValue, newPassword }
+     * Validates OTP and updates the user’s password.
      */
     resetPassword: async (req, res, next) => {
         const { email, codeValue, newPassword } = req.body;
-
-        // Validate input
         if (!email || !codeValue || !newPassword) {
-            return res.status(400).json({ error: 'Email, codeValue, and newPassword are required.' });
+            return res
+                .status(400)
+                .json({ error: "Email, codeValue, and newPassword are required." });
         }
 
         try {
-            // 1. Fetch user by email
-            const [userRows] = await pool.execute(
-                'SELECT user_id FROM USERS WHERE email = ?',
+            // 1) Lookup user
+            const [users] = await pool.execute(
+                "SELECT user_id FROM USERS WHERE email = ?",
                 [email]
             );
-            if (userRows.length === 0) {
-                return res.status(400).json({ error: 'Invalid email or OTP.' });
+            if (users.length === 0) {
+                return res.status(400).json({ error: "Invalid email/OTP." });
             }
-            const userId = userRows[0].user_id;
+            const userId = users[0].user_id;
 
-            // 2. Fetch OTP row that matches user_id, codeValue, isUsed = FALSE, and not expired
-            const [otpRows] = await pool.execute(
-                `SELECT otp_id, expirationTime, isUsed
-         FROM OTPS
-         WHERE user_id = ? AND codeValue = ? AND isUsed = FALSE
-         ORDER BY createdAt DESC
+            // 2) Find matching OTP
+            const [otps] = await pool.execute(
+                `SELECT otp_id, expirationTime 
+         FROM OTPS 
+         WHERE user_id = ? 
+           AND codeValue = ? 
+           AND isUsed = FALSE 
+         ORDER BY createdAt DESC 
          LIMIT 1`,
                 [userId, codeValue]
             );
-
-            if (otpRows.length === 0) {
-                return res.status(400).json({ error: 'Invalid or expired OTP.' });
+            if (otps.length === 0) {
+                return res.status(400).json({ error: "Invalid or expired OTP." });
+            }
+            const otp = otps[0];
+            if (new Date(otp.expirationTime) < new Date()) {
+                return res.status(400).json({ error: "OTP has expired." });
             }
 
-            const otpRecord = otpRows[0];
-            const now = new Date();
-
-            // 3. Check if OTP is expired
-            if (new Date(otpRecord.expirationTime) < now) {
-                return res.status(400).json({ error: 'OTP has expired.' });
-            }
-
-            // 4. Hash the new password
-            const saltRounds = 10;
-            const hashedPassword = await bcrypt.hash(newPassword, saltRounds);
-
-            // 5. Begin transaction: mark OTP used and update the user's password
+            // 3) Hash new password & update in a transaction
             const conn = await pool.getConnection();
             try {
                 await conn.beginTransaction();
 
-                // a) Mark OTP as used
                 await conn.execute(
-                    `UPDATE OTPS
-           SET isUsed = TRUE, updatedAt = NOW()
-           WHERE otp_id = ?`,
-                    [otpRecord.otp_id]
+                    "UPDATE OTPS SET isUsed = TRUE, updatedAt = NOW() WHERE otp_id = ?",
+                    [otp.otp_id]
                 );
 
-                // b) Update user's password
+                const hashed = await bcrypt.hash(newPassword, 10);
                 await conn.execute(
-                    `UPDATE USERS
-           SET password = ?, updatedAt = NOW()
-           WHERE user_id = ?`,
-                    [hashedPassword, userId]
+                    "UPDATE USERS SET password = ?, updatedAt = NOW() WHERE user_id = ?",
+                    [hashed, userId]
                 );
 
                 await conn.commit();
             } catch (txErr) {
                 await conn.rollback();
-                conn.release();
                 throw txErr;
+            } finally {
+                conn.release();
             }
-            conn.release();
 
-            return res.json({ message: 'Password has been reset successfully.' });
+            return res.json({ message: "Password reset successful." });
         } catch (err) {
             return next(err);
         }

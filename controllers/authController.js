@@ -38,11 +38,11 @@ async function sendOTPEmail(toEmail, codeValue) {
 module.exports = {
     /**
      * POST /api/auth/signup
-     * Body: { email, password }
+     * Body: { email, password, accountType }
      * Creates a new user (email+hashed password) and returns userId + JWT.
      */
     signup: async (req, res, next) => {
-        const { email, password } = req.body;
+        const { email, password, accountType } = req.body;
         if (!email || !password) {
             return res
                 .status(400)
@@ -64,7 +64,7 @@ module.exports = {
             // 2) Hash password & insert
             const hashed = await bcrypt.hash(password, 10);
             const [result] = await pool.execute(
-                "INSERT INTO USERS (email, password) VALUES (?, ?)",
+                "INSERT INTO USERS (email, password, accountType) VALUES (?, ?)",
                 [email, hashed]
             );
             const userId = result.insertId;

@@ -64,8 +64,8 @@ module.exports = {
             // 2) Hash password & insert
             const hashed = await bcrypt.hash(password, 10);
             const [result] = await pool.execute(
-                "INSERT INTO USERS (email, password, accountType) VALUES (?, ?)",
-                [email, hashed]
+                "INSERT INTO USERS (email, password, accountType) VALUES (?, ?, ?)",
+                [email, hashed, accountType]
             );
             const userId = result.insertId;
 

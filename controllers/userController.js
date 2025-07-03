@@ -1,65 +1,116 @@
 // controllers/userController.js
 
 const pool = require('../db');
+const nodemailer = require('nodemailer');
+const dotenv = require('dotenv');
+
+dotenv.config();
+
+// ─── Helpers for Guardian Binding OTP ─────────────────────────────────────
+function generateOTP() {
+    return Math.floor(100000 + Math.random() * 900000).toString();
+}
+
+async function sendOTPEmail(toEmail, codeValue) {
+    const transporter = nodemailer.createTransport({
+        host: 'smtp.gmail.com',
+        port: 465,
+        secure: true,
+        auth: {
+            user: process.env.EMAIL_USER,
+            pass: process.env.EMAIL_PASS,
+        },
+        tls: {
+            rejectUnauthorized: false,
+        },
+    });
+
+    const mailOptions = {
+        from: process.env.EMAIL_USER,
+        to: toEmail,
+        subject: 'Your Guardian Binding Code',
+        text: `Your binding OTP code is: ${codeValue}. Expires in ${process.env.OTP_EXPIRATION_MINUTES} minutes.`,
+    };
+
+    await transporter.sendMail(mailOptions);
+}
 
 /**
  * GET /api/user/dashboard
- * Returns a welcome message plus the user’s own scanCount and premium status.
+ * Returns a welcome message plus the user’s scanCount and premium status.
  */
 async function getDashboard(req, res, next) {
     try {
         const { user_id, email, accountType } = req.user;
+
         const [rows] = await pool.execute(
-            `SELECT scanCount, isPremiumUser
-             FROM USERS
-             WHERE user_id = ?`,
+            `SELECT
+         scanCount,
+         isPremiumUser
+       FROM USERS
+       WHERE user_id = ?`,
             [user_id]
         );
-        if (rows.length === 0) {
+
+        if (!rows.length) {
             return res.status(404).json({ error: 'User not found' });
         }
+
         const { scanCount, isPremiumUser } = rows[0];
-        return res.json({
+
+        res.json({
             message: `Welcome to your dashboard, ${email}!`,
             user: {
                 user_id,
                 email,
                 accountType,
                 scanCount,
-                isPremiumUser: isPremiumUser === 1
-            }
+                isPremiumUser: !!isPremiumUser,
+            },
         });
     } catch (err) {
-        return next(err);
+        next(err);
     }
 }
 
 /**
  * GET /api/user/profile
- * Returns the user’s full profile row.
+ * Returns the user’s full profile.
  */
 async function getProfile(req, res, next) {
     try {
         const { user_id } = req.user;
+
         const [rows] = await pool.execute(
-            `SELECT user_id, email, accountType, isPremiumUser, scanCount, deviceUuid, phone, createdAt, updatedAt
-             FROM USERS
-             WHERE user_id = ?`,
+            `SELECT
+         user_id,
+         email,
+         accountType,
+         isPremiumUser,
+         scanCount,
+         deviceUuid,
+         phone,
+         createdAt,
+         updatedAt
+       FROM USERS
+       WHERE user_id = ?`,
             [user_id]
         );
-        if (rows.length === 0) {
+
+        if (!rows.length) {
             return res.status(404).json({ error: 'User not found' });
         }
-        return res.json(rows[0]);
+
+        res.json(rows[0]);
     } catch (err) {
-        return next(err);
+        next(err);
     }
 }
 
 /**
  * POST /api/user/ocr-scans
- * Body: { recognizedText: string, text: string }
- * Creates a new OCR scan for the authenticated user.
+ * Body: { recognizedText, text }
+ * Creates a new OCR scan.
  */
 async function createOCRScan(req, res, next) {
     try {
@@ -67,36 +118,40 @@ async function createOCRScan(req, res, next) {
         const { recognizedText, text } = req.body;
 
         if (typeof recognizedText !== 'string' || typeof text !== 'string') {
-            return res.status(400).json({
-                error: 'Request body must include recognizedText (string) and text (string).'
-            });
+            return res.status(400).json({ error: 'recognizedText and text are required strings.' });
         }
 
         const [result] = await pool.execute(
-            `INSERT INTO OCR_SCANS
-         (user_id, recognizedText, text, dateTime, createdAt, updatedAt)
-       VALUES (?, ?, ?, NOW(), NOW(), NOW())`,
+            `INSERT INTO OCR_SCANS (
+         user_id,
+         recognizedText,
+         text,
+         dateTime,
+         createdAt,
+         updatedAt
+       ) VALUES (
+         ?, ?, ?, NOW(), NOW(), NOW()
+       )`,
             [user_id, recognizedText, text]
         );
 
-        const newScanId = result.insertId;
-        return res.status(201).json({
-            message: 'OCR scan created successfully.',
+        res.status(201).json({
+            message: 'OCR scan created.',
             scan: {
-                scanId: newScanId,
+                scanId: result.insertId,
                 recognizedText,
-                text
-            }
+                text,
+            },
         });
     } catch (err) {
-        return next(err);
+        next(err);
     }
 }
 
 /**
  * POST /api/user/object-scans
- * Body: { recognizedObjects: string, text: string }
- * Creates a new Object scan for the authenticated user.
+ * Body: { recognizedObjects, text }
+ * Creates a new Object scan.
  */
 async function createObjectScan(req, res, next) {
     try {
@@ -104,83 +159,109 @@ async function createObjectScan(req, res, next) {
         const { recognizedObjects, text } = req.body;
 
         if (typeof recognizedObjects !== 'string' || typeof text !== 'string') {
-            return res.status(400).json({
-                error: 'Request body must include recognizedObjects (string) and text (string).'
-            });
+            return res.status(400).json({ error: 'recognizedObjects and text are required strings.' });
         }
 
         const [result] = await pool.execute(
-            `INSERT INTO OBJECT_SCANS
-         (user_id, recognizedObjects, text, createdAt, updatedAt)
-       VALUES (?, ?, ?, NOW(), NOW())`,
+            `INSERT INTO OBJECT_SCANS (
+         user_id,
+         recognizedObjects,
+         text,
+         createdAt,
+         updatedAt
+       ) VALUES (
+         ?, ?, ?, NOW(), NOW()
+       )`,
             [user_id, recognizedObjects, text]
         );
 
-        const newScanId = result.insertId;
-        return res.status(201).json({
-            message: 'Object scan created successfully.',
+        res.status(201).json({
+            message: 'Object scan created.',
             scan: {
-                scanId: newScanId,
+                scanId: result.insertId,
                 recognizedObjects,
-                text
-            }
+                text,
+            },
         });
     } catch (err) {
-        return next(err);
+        next(err);
     }
 }
 
 /**
  * GET /api/user/scans
- * Returns all OCR and Object scans belonging to the authenticated user, sorted by createdAt DESC.
- * Response: [
- *   { scanId, name, text, type: 'Object' | 'Text', createdAt },
- *   ...
- * ]
+ * Returns all scans for the user or, if Guardian, for bound users.
  */
 async function getUserScans(req, res, next) {
     try {
-        const { user_id } = req.user;
+        const { user_id, accountType } = req.user;
+        let ids = [user_id];
+
+        if (accountType === 'Guardian') {
+            const [links] = await pool.execute(
+                `SELECT user_id FROM USER_GUARDIAN_LINK WHERE guardian_id = ?`,
+                [user_id]
+            );
+
+            ids = links.length ? links.map(r => r.user_id) : ids;
+        }
+
+        const placeholderString = ids.map(() => '?').join(',');
+
         const [rows] = await pool.execute(
             `SELECT
-         scan_id           AS scanId,
+         scan_id AS scanId,
          recognizedObjects AS name,
-         text              AS text,
-         'Object'          AS type,
+         text,
+         'Object' AS type,
          createdAt
        FROM OBJECT_SCANS
-       WHERE user_id = ?
+       WHERE user_id IN (${placeholderString})
        UNION ALL
        SELECT
-         ocr_id            AS scanId,
-         recognizedText    AS name,
-         text              AS text,
-         'Text'            AS type,
-         createdAt
+         ocr_id AS scanId,
+         recognizedText AS name,
+         text,
+         'Text' AS type,
+         dateTime AS createdAt
        FROM OCR_SCANS
-       WHERE user_id = ?
+       WHERE user_id IN (${placeholderString})
        ORDER BY createdAt DESC`,
-            [user_id, user_id]
+            [...ids, ...ids]
         );
-        return res.json(rows);
+
+        res.json(rows);
     } catch (err) {
-        return next(err);
+        next(err);
     }
 }
 
 /**
  * GET /api/user/scans/:scanId
- * Returns details for a single scan — either from OCR_SCANS or OBJECT_SCANS — if it belongs to the user.
+ * Returns a single scan if authorized.
  */
 async function getSingleScan(req, res, next) {
     try {
-        const { user_id } = req.user;
-        const scanId = parseInt(req.params.scanId);
+        const { user_id, accountType } = req.user;
+        const scanId = parseInt(req.params.scanId, 10);
+
         if (isNaN(scanId)) {
-            return res.status(400).json({ error: 'Invalid scanId parameter' });
+            return res.status(400).json({ error: 'Invalid scanId' });
         }
 
-        // 1) Try OCR_SCANS
+        let ids = [user_id];
+
+        if (accountType === 'Guardian') {
+            const [links] = await pool.execute(
+                `SELECT user_id FROM USER_GUARDIAN_LINK WHERE guardian_id = ?`,
+                [user_id]
+            );
+
+            ids = links.length ? links.map(r => r.user_id) : ids;
+        }
+
+        const placeholderString = ids.map(() => '?').join(',');
+
         const [ocrRows] = await pool.execute(
             `SELECT
          ocr_id AS scanId,
@@ -190,14 +271,14 @@ async function getSingleScan(req, res, next) {
          createdAt,
          updatedAt
        FROM OCR_SCANS
-       WHERE ocr_id = ? AND user_id = ?`,
-            [scanId, user_id]
+       WHERE ocr_id = ? AND user_id IN (${placeholderString})`,
+            [scanId, ...ids]
         );
-        if (ocrRows.length > 0) {
+
+        if (ocrRows.length) {
             return res.json({ type: 'Text', ...ocrRows[0] });
         }
 
-        // 2) Otherwise try OBJECT_SCANS
         const [objRows] = await pool.execute(
             `SELECT
          scan_id AS scanId,
@@ -206,118 +287,342 @@ async function getSingleScan(req, res, next) {
          createdAt,
          updatedAt
        FROM OBJECT_SCANS
-       WHERE scan_id = ? AND user_id = ?`,
-            [scanId, user_id]
+       WHERE scan_id = ? AND user_id IN (${placeholderString})`,
+            [scanId, ...ids]
         );
-        if (objRows.length > 0) {
+
+        if (objRows.length) {
             return res.json({ type: 'Object', ...objRows[0] });
         }
 
-        // 3) Not found
-        return res.status(404).json({ error: 'Scan not found' });
+        res.status(404).json({ error: 'Scan not found' });
     } catch (err) {
-        return next(err);
+        next(err);
     }
 }
 
 /**
  * PUT /api/user/scans/:scanId
- * Body: { type: 'Object' | 'Text', name: string, text: string }
- * Updates an existing scan (OCR or Object) if it belongs to the user.
+ * Body: { type, name, text }
+ * Updates a scan if authorized.
  */
 async function updateScan(req, res, next) {
     try {
         const { user_id } = req.user;
-        const scanId = parseInt(req.params.scanId);
-        if (isNaN(scanId)) {
-            return res.status(400).json({ error: 'Invalid scanId parameter' });
-        }
-
+        const scanId = parseInt(req.params.scanId, 10);
         const { type, name, text } = req.body;
-        if (!['Object', 'Text'].includes(type) || typeof name !== 'string' || typeof text !== 'string') {
-            return res.status(400).json({
-                error: "Request body must include type ('Object' or 'Text'), name (string), and text (string)."
-            });
+
+        if (
+            isNaN(scanId) ||
+            !['Object', 'Text'].includes(type) ||
+            typeof name !== 'string' ||
+            typeof text !== 'string'
+        ) {
+            return res.status(400).json({ error: 'Invalid input' });
         }
 
         if (type === 'Text') {
-            // Check that the OCR scan exists and belongs to this user
             const [check] = await pool.execute(
                 `SELECT ocr_id FROM OCR_SCANS WHERE ocr_id = ? AND user_id = ?`,
                 [scanId, user_id]
             );
-            if (check.length === 0) {
-                return res.status(404).json({ error: 'OCR scan not found or does not belong to user.' });
+
+            if (!check.length) {
+                return res.status(404).json({ error: 'OCR scan not found' });
             }
 
-            // Update the OCR_SCANS row
             await pool.execute(
                 `UPDATE OCR_SCANS
          SET recognizedText = ?, text = ?, updatedAt = NOW()
          WHERE ocr_id = ?`,
                 [name, text, scanId]
             );
-            return res.json({ message: 'OCR scan updated successfully.' });
         } else {
-            // Check that the Object scan exists and belongs to this user
             const [check] = await pool.execute(
                 `SELECT scan_id FROM OBJECT_SCANS WHERE scan_id = ? AND user_id = ?`,
                 [scanId, user_id]
             );
-            if (check.length === 0) {
-                return res.status(404).json({ error: 'Object scan not found or does not belong to user.' });
+
+            if (!check.length) {
+                return res.status(404).json({ error: 'Object scan not found' });
             }
 
-            // Update the OBJECT_SCANS row
             await pool.execute(
                 `UPDATE OBJECT_SCANS
          SET recognizedObjects = ?, text = ?, updatedAt = NOW()
          WHERE scan_id = ?`,
                 [name, text, scanId]
             );
-            return res.json({ message: 'Object scan updated successfully.' });
         }
+
+        res.json({ message: 'Scan updated successfully.' });
     } catch (err) {
-        return next(err);
+        next(err);
     }
 }
 
 /**
  * DELETE /api/user/scans/:scanId
- * Deletes a scan (OCR or Object) if it belongs to the user.
+ * Deletes a scan if authorized.
  */
 async function deleteScan(req, res, next) {
     try {
         const { user_id } = req.user;
-        const scanId = parseInt(req.params.scanId);
+        const scanId = parseInt(req.params.scanId, 10);
+
         if (isNaN(scanId)) {
-            return res.status(400).json({ error: 'Invalid scanId parameter' });
+            return res.status(400).json({ error: 'Invalid scanId' });
         }
 
-        // 1) Try deleting from OCR_SCANS
-        const [ocrDelete] = await pool.execute(
-            `DELETE FROM OCR_SCANS
-       WHERE ocr_id = ? AND user_id = ?`,
+        const [ocrDel] = await pool.execute(
+            `DELETE FROM OCR_SCANS WHERE ocr_id = ? AND user_id = ?`,
             [scanId, user_id]
         );
-        if (ocrDelete.affectedRows > 0) {
-            return res.json({ message: 'OCR scan deleted successfully.' });
+
+        if (ocrDel.affectedRows) {
+            return res.json({ message: 'OCR scan deleted.' });
         }
 
-        // 2) Try deleting from OBJECT_SCANS
-        const [objDelete] = await pool.execute(
-            `DELETE FROM OBJECT_SCANS
-       WHERE scan_id = ? AND user_id = ?`,
+        const [objDel] = await pool.execute(
+            `DELETE FROM OBJECT_SCANS WHERE scan_id = ? AND user_id = ?`,
             [scanId, user_id]
         );
-        if (objDelete.affectedRows > 0) {
-            return res.json({ message: 'Object scan deleted successfully.' });
+
+        if (objDel.affectedRows) {
+            return res.json({ message: 'Object scan deleted.' });
         }
 
-        // 3) Neither found
-        return res.status(404).json({ error: 'Scan not found or does not belong to user.' });
+        res.status(404).json({ error: 'Scan not found' });
     } catch (err) {
-        return next(err);
+        next(err);
+    }
+}
+
+/**
+ * POST /api/user/guardian/bind-request
+ */
+async function requestGuardianBind(req, res, next) {
+    try {
+        const { user_id, accountType } = req.user;
+
+        if (accountType !== 'Guardian') {
+            return res.status(403).json({ error: 'Only Guardians can request binding.' });
+        }
+
+        const { email } = req.body;
+
+        if (typeof email !== 'string') {
+            return res.status(400).json({ error: 'Email required.' });
+        }
+
+        const [users] = await pool.execute(
+            `SELECT user_id FROM USERS WHERE email = ?`,
+            [email]
+        );
+
+        if (!users.length) {
+            return res.status(404).json({ error: 'User not found.' });
+        }
+
+        const targetId = users[0].user_id;
+        const codeValue = generateOTP();
+        const expiration = new Date(
+            Date.now() + parseInt(process.env.OTP_EXPIRATION_MINUTES, 10) * 60000
+        );
+
+        await pool.execute(
+            `INSERT INTO OTPS (
+         user_id,
+         codeValue,
+         expirationTime,
+         isUsed,
+         createdAt,
+         updatedAt
+       ) VALUES (
+         ?, ?, ?, FALSE, NOW(), NOW()
+       )`,
+            [targetId, codeValue, expiration]
+        );
+
+        await sendOTPEmail(email, codeValue);
+
+        res.json({ message: 'OTP sent.' });
+    } catch (err) {
+        next(err);
+    }
+}
+
+/**
+ * POST /api/user/guardian/bind-confirm
+ */
+async function confirmGuardianBind(req, res, next) {
+    const conn = await pool.getConnection();
+
+    try {
+        const { user_id: guardianId, accountType } = req.user;
+
+        if (accountType !== 'Guardian') {
+            conn.release();
+            return res.status(403).json({ error: 'Only Guardians can confirm.' });
+        }
+
+        const { email, codeValue } = req.body;
+
+        if (typeof email !== 'string' || typeof codeValue !== 'string') {
+            conn.release();
+            return res.status(400).json({ error: 'Invalid input.' });
+        }
+
+        const [users] = await conn.execute(
+            `SELECT user_id FROM USERS WHERE email = ?`,
+            [email]
+        );
+
+        if (!users.length) {
+            conn.release();
+            return res.status(404).json({ error: 'User not found.' });
+        }
+
+        const targetId = users[0].user_id;
+
+        const [otps] = await conn.execute(
+            `SELECT
+         otp_id,
+         expirationTime
+       FROM OTPS
+       WHERE user_id = ? AND codeValue = ? AND isUsed = FALSE
+       ORDER BY createdAt DESC
+       LIMIT 1`,
+            [targetId, codeValue]
+        );
+
+        if (!otps.length) {
+            conn.release();
+            return res.status(400).json({ error: 'OTP invalid/expired.' });
+        }
+
+        const otp = otps[0];
+
+        if (new Date(otp.expirationTime) < new Date()) {
+            conn.release();
+            return res.status(400).json({ error: 'OTP expired.' });
+        }
+
+        await conn.beginTransaction();
+
+        await conn.execute(
+            `UPDATE OTPS
+       SET isUsed = TRUE,
+           updatedAt = NOW()
+       WHERE otp_id = ?`,
+            [otp.otp_id]
+        );
+
+        await conn.execute(
+            `INSERT INTO USER_GUARDIAN_LINK (
+         user_id,
+         guardian_id,
+         createdAt,
+         updatedAt
+       ) VALUES (
+         ?, ?, NOW(), NOW()
+       )`,
+            [targetId, guardianId]
+        );
+
+        await conn.commit();
+        conn.release();
+
+        res.json({ message: 'Guardian bound.' });
+    } catch (err) {
+        await conn.rollback();
+        conn.release();
+        next(err);
+    }
+}
+
+/**
+ * GET /api/user/guardian/bound-users
+ */
+async function getBoundUsers(req, res, next) {
+    try {
+        const { user_id, accountType } = req.user;
+
+        if (accountType !== 'Guardian') {
+            return res.status(403).json({ error: 'Only Guardians can view.' });
+        }
+
+        const [rows] = await pool.execute(
+            `SELECT
+         u.user_id,
+         u.email
+       FROM USER_GUARDIAN_LINK l
+       JOIN USERS u ON u.user_id = l.user_id
+       WHERE l.guardian_id = ?`,
+            [user_id]
+        );
+
+        res.json(rows);
+    } catch (err) {
+        next(err);
+    }
+}
+
+/**
+ * GET /api/user/scans/user
+ * Query: ?user_id=<number>
+ * Returns scans for a specific user if requester is that user or bound Guardian.
+ */
+async function getScansByUser(req, res, next) {
+    try {
+        const { user_id: requesterId, accountType } = req.user;
+        const targetId = parseInt(req.query.user_id, 10);
+
+        if (isNaN(targetId)) {
+            return res.status(400).json({ error: 'Invalid user_id.' });
+        }
+
+        if (targetId !== requesterId) {
+            if (accountType !== 'Guardian') {
+                return res.status(403).json({ error: 'Not authorized.' });
+            }
+
+            const [link] = await pool.execute(
+                `SELECT 1 FROM USER_GUARDIAN_LINK
+         WHERE guardian_id = ? AND user_id = ?`,
+                [requesterId, targetId]
+            );
+
+            if (!link.length) {
+                return res.status(403).json({ error: 'Not bound.' });
+            }
+        }
+
+        const [rows] = await pool.execute(
+            `SELECT
+                 scan_id AS scanId,
+                 recognizedObjects AS name,
+                 text,
+                 'Object' AS type,
+                 createdAt
+             FROM OBJECT_SCANS
+             WHERE user_id = ?
+             UNION ALL
+             SELECT
+                 ocr_id AS scanId,
+                 recognizedText AS name,
+                 text,
+                 'Text' AS type,
+                 dateTime AS createdAt
+             FROM OCR_SCANS
+             WHERE user_id = ?
+             ORDER BY createdAt DESC`,
+            [targetId, targetId]
+        );
+
+        res.json(rows);
+    } catch (err) {
+        next(err);
     }
 }
 
@@ -329,5 +634,9 @@ module.exports = {
     getUserScans,
     getSingleScan,
     updateScan,
-    deleteScan
+    deleteScan,
+    requestGuardianBind,
+    confirmGuardianBind,
+    getBoundUsers,
+    getScansByUser,
 };

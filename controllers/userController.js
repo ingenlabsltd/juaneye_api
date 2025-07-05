@@ -304,11 +304,12 @@ async function getSingleScan(req, res, next) {
 /**
  * PUT /api/user/scans/:scanId
  * Body: { type, name, text }
- * Updates a scan if authorized.
+ * Updates a scan if authorized (owner or bound Guardian).
  */
 async function updateScan(req, res, next) {
+    const conn = await pool.getConnection();
     try {
-        const { user_id } = req.user;
+        const { user_id: requesterId, accountType } = req.user;
         const scanId = parseInt(req.params.scanId, 10);
         const { type, name, text } = req.body;
 
@@ -321,36 +322,58 @@ async function updateScan(req, res, next) {
             return res.status(400).json({ error: 'Invalid input' });
         }
 
+        // 1) figure out who owns this scan
+        let ownerRows;
         if (type === 'Text') {
-            const [check] = await pool.execute(
-                `SELECT ocr_id FROM OCR_SCANS WHERE ocr_id = ? AND user_id = ?`,
-                [scanId, user_id]
+            [ownerRows] = await conn.execute(
+                `SELECT user_id FROM OCR_SCANS WHERE ocr_id = ?`,
+                [scanId]
             );
+        } else {
+            [ownerRows] = await conn.execute(
+                `SELECT user_id FROM OBJECT_SCANS WHERE scan_id = ?`,
+                [scanId]
+            );
+        }
 
-            if (!check.length) {
-                return res.status(404).json({ error: 'OCR scan not found' });
-            }
+        if (!ownerRows.length) {
+            return res.status(404).json({ error: type === 'Text' ? 'OCR scan not found' : 'Object scan not found' });
+        }
 
-            await pool.execute(
+        const ownerId = ownerRows[0].user_id;
+
+        // 2) check permissions: either you are the owner...
+        let allowed = ownerId === requesterId;
+
+        // ...or you are a Guardian bound to that owner
+        if (!allowed && accountType === 'Guardian') {
+            const [links] = await conn.execute(
+                `SELECT 1
+                   FROM USER_GUARDIAN_LINK
+                  WHERE guardian_id = ?
+                    AND user_id     = ?`,
+                [requesterId, ownerId]
+            );
+            allowed = links.length > 0;
+        }
+
+        if (!allowed) {
+            return res.status(403).json({ error: 'Not authorized to update this scan.' });
+        }
+
+        // 3) finally, perform the update
+        if (type === 'Text') {
+            await conn.execute(
                 `UPDATE OCR_SCANS
-         SET recognizedText = ?, text = ?, updatedAt = NOW()
-         WHERE ocr_id = ?`,
+                    SET recognizedText = ?, text = ?, updatedAt = NOW()
+                  WHERE ocr_id = ?`,
                 [name, text, scanId]
             );
         } else {
-            const [check] = await pool.execute(
-                `SELECT scan_id FROM OBJECT_SCANS WHERE scan_id = ? AND user_id = ?`,
-                [scanId, user_id]
-            );
-
-            if (!check.length) {
-                return res.status(404).json({ error: 'Object scan not found' });
-            }
-
-            await pool.execute(
+            await conn.execute(
                 `UPDATE OBJECT_SCANS
-         SET recognizedObjects = ?, text = ?, updatedAt = NOW()
-         WHERE scan_id = ?`,
+                    SET recognizedObjects = ?, text = ?, updatedAt = NOW()
+                  WHERE scan_id = ?`,
                 [name, text, scanId]
             );
         }
@@ -358,6 +381,8 @@ async function updateScan(req, res, next) {
         res.json({ message: 'Scan updated successfully.' });
     } catch (err) {
         next(err);
+    } finally {
+        conn.release();
     }
 }
 
@@ -487,12 +512,12 @@ async function confirmGuardianBind(req, res, next) {
 
         const [otps] = await conn.execute(
             `SELECT
-         otp_id,
-         expirationTime
-       FROM OTPS
-       WHERE user_id = ? AND codeValue = ? AND isUsed = FALSE
-       ORDER BY createdAt DESC
-       LIMIT 1`,
+                 otp_id,
+                 expirationTime
+             FROM OTPS
+             WHERE user_id = ? AND codeValue = ? AND isUsed = FALSE
+             ORDER BY createdAt DESC
+                 LIMIT 1`,
             [targetId, codeValue]
         );
 
@@ -512,21 +537,21 @@ async function confirmGuardianBind(req, res, next) {
 
         await conn.execute(
             `UPDATE OTPS
-       SET isUsed = TRUE,
-           updatedAt = NOW()
-       WHERE otp_id = ?`,
+             SET isUsed = TRUE,
+                 updatedAt = NOW()
+             WHERE otp_id = ?`,
             [otp.otp_id]
         );
 
         await conn.execute(
             `INSERT INTO USER_GUARDIAN_LINK (
-         user_id,
-         guardian_id,
-         createdAt,
-         updatedAt
-       ) VALUES (
-         ?, ?, NOW(), NOW()
-       )`,
+                user_id,
+                guardian_id,
+                created_at,
+                updated_at
+            ) VALUES (
+                         ?, ?, NOW(), NOW()
+                     )`,
             [targetId, guardianId]
         );
 

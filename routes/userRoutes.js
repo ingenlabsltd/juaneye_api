@@ -44,4 +44,7 @@ router.post('/user/guardian/bind-confirm', userController.confirmGuardianBind);
 // GET  /api/user/guardian/bound-users
 router.get('/user/guardian/bound-users', userController.getBoundUsers);
 
+// GET  /api/user/guardian/scan-stats
+router.get('/user/guardian/scan-stats', userController.getScanStats);
+
 module.exports = router;

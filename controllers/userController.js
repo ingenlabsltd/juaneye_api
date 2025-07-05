@@ -651,6 +651,65 @@ async function getScansByUser(req, res, next) {
     }
 }
 
+/**
+ * GET /api/user/guardian/scan-stats
+ * Query params (optional): startDate=YYYY-MM-DD, endDate=YYYY-MM-DD
+ * Returns aggregated counts for bound users over the given date range.
+ * Defaults to today 00:00:00 → now.
+ */
+async function getScanStats(req, res, next) {
+    try {
+        const { user_id: guardianId, accountType } = req.user;
+        if (accountType !== 'Guardian') {
+            return res.status(403).json({ error: 'Only Guardians can view stats.' });
+        }
+
+        // parse dates or default to today
+        const today = new Date();
+        const start = req.query.startDate
+            ? new Date(String(req.query.startDate))
+            : new Date(today.getFullYear(), today.getMonth(), today.getDate());
+        const end = req.query.endDate
+            ? new Date(String(req.query.endDate))
+            : today;
+
+        // get the list of bound user IDs
+        const [links] = await pool.execute(
+            `SELECT user_id FROM USER_GUARDIAN_LINK WHERE guardian_id = ?`,
+            [guardianId]
+        );
+        const userIds = links.map(r => r.user_id);
+        if (userIds.length === 0) {
+            return res.json({ objectScanCount: 0, ocrScanCount: 0 });
+        }
+
+        const placeholders = userIds.map(() => '?').join(',');
+        // count object scans
+        const [objRows] = await pool.execute(
+            `SELECT COUNT(*) AS objectScanCount
+         FROM OBJECT_SCANS
+        WHERE user_id IN (${placeholders})
+          AND createdAt BETWEEN ? AND ?`,
+            [...userIds, start, end]
+        );
+        // count OCR scans
+        const [ocrRows] = await pool.execute(
+            `SELECT COUNT(*) AS ocrScanCount
+         FROM OCR_SCANS
+        WHERE user_id IN (${placeholders})
+          AND dateTime BETWEEN ? AND ?`,
+            [...userIds, start, end]
+        );
+
+        res.json({
+            objectScanCount: objRows[0].objectScanCount,
+            ocrScanCount: ocrRows[0].ocrScanCount,
+        });
+    } catch (err) {
+        next(err);
+    }
+}
+
 module.exports = {
     getDashboard,
     getProfile,
@@ -664,4 +723,5 @@ module.exports = {
     confirmGuardianBind,
     getBoundUsers,
     getScansByUser,
+    getScanStats,
 };

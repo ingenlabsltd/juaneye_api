@@ -485,76 +485,76 @@ async function confirmGuardianBind(req, res, next) {
 
     try {
         const { user_id: guardianId, accountType } = req.user;
-
         if (accountType !== 'Guardian') {
             conn.release();
             return res.status(403).json({ error: 'Only Guardians can confirm.' });
         }
 
         const { email, codeValue } = req.body;
-
         if (typeof email !== 'string' || typeof codeValue !== 'string') {
             conn.release();
             return res.status(400).json({ error: 'Invalid input.' });
         }
 
+        // 1) lookup target user
         const [users] = await conn.execute(
             `SELECT user_id FROM USERS WHERE email = ?`,
             [email]
         );
-
         if (!users.length) {
             conn.release();
             return res.status(404).json({ error: 'User not found.' });
         }
-
         const targetId = users[0].user_id;
 
+        // 2) verify OTP
         const [otps] = await conn.execute(
-            `SELECT
-                 otp_id,
-                 expirationTime
+            `SELECT otp_id, expirationTime
              FROM OTPS
              WHERE user_id = ? AND codeValue = ? AND isUsed = FALSE
              ORDER BY createdAt DESC
                  LIMIT 1`,
             [targetId, codeValue]
         );
-
         if (!otps.length) {
             conn.release();
             return res.status(400).json({ error: 'OTP invalid/expired.' });
         }
-
-        const otp = otps[0];
-
-        if (new Date(otp.expirationTime) < new Date()) {
+        if (new Date(otps[0].expirationTime) < new Date()) {
             conn.release();
             return res.status(400).json({ error: 'OTP expired.' });
         }
 
-        await conn.beginTransaction();
+        // 3) check for existing binding
+        const [existing] = await conn.execute(
+            `SELECT 1
+         FROM USER_GUARDIAN_LINK
+        WHERE user_id = ? AND guardian_id = ?`,
+            [targetId, guardianId]
+        );
+        if (existing.length) {
+            conn.release();
+            return res.status(409).json({ error: 'Already bound to this user.' });
+        }
 
+        // 4) mark OTP used and insert binding
+        await conn.beginTransaction();
         await conn.execute(
             `UPDATE OTPS
-             SET isUsed = TRUE,
-                 updatedAt = NOW()
+             SET isUsed = TRUE, updatedAt = NOW()
              WHERE otp_id = ?`,
-            [otp.otp_id]
+            [otps[0].otp_id]
         );
-
         await conn.execute(
             `INSERT INTO USER_GUARDIAN_LINK (
                 user_id,
                 guardian_id,
-                created_at,
-                updated_at
+                linkedOn
             ) VALUES (
-                         ?, ?, NOW(), NOW()
+                         ?, ?, NOW()
                      )`,
             [targetId, guardianId]
         );
-
         await conn.commit();
         conn.release();
 

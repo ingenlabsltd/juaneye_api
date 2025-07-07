@@ -3,6 +3,11 @@
 const pool = require('../db');
 const nodemailer = require('nodemailer');
 const dotenv = require('dotenv');
+const fs = require('fs');
+const path = require('path');
+const multer = require('multer');
+const { v4: uuidv4 } = require('uuid');
+const axios = require('axios');
 
 dotenv.config();
 
@@ -710,6 +715,220 @@ async function getScanStats(req, res, next) {
     }
 }
 
+const imageStorage = multer.diskStorage({
+    destination: (req, file, cb) => {
+        // first try authenticated user
+        let email = req.user && typeof req.user.email === 'string'
+            ? req.user.email
+            : null;
+
+        // fallback: load email from DB by user_id
+        if (!email) {
+            const userId = req.user && req.user.user_id;
+            if (!userId) {
+                return cb(new Error('User ID not available for upload path'), null);
+            }
+            return pool.execute(
+                `SELECT email FROM USERS WHERE user_id = ?`,
+                [userId]
+            ).then(([rows]) => {
+                if (!rows.length || typeof rows[0].email !== 'string') {
+                    throw new Error('User not found for upload path');
+                }
+                email = rows[0].email;
+                const dateFolder = new Date().toISOString().split('T')[0];
+                const uploadDir = path.join(__dirname, '..', 'uploads', email, dateFolder);
+                fs.mkdirSync(uploadDir, { recursive: true });
+                cb(null, uploadDir);
+            }).catch(err => {
+                cb(err, null);
+            });
+        }
+
+        // use today's date as folder name
+        const dateFolder = new Date().toISOString().split('T')[0];
+        const uploadDir = path.join(__dirname, '..', 'uploads', email, dateFolder);
+        fs.mkdirSync(uploadDir, { recursive: true });
+        cb(null, uploadDir);
+    },
+    filename: (req, file, cb) => {
+        // timestamp + original name
+        const uniqueName = `${Date.now()}-${file.originalname}`;
+        cb(null, uniqueName);
+    },
+});
+
+const upload = multer({
+    storage: imageStorage,
+    fileFilter: (req, file, cb) => {
+        const allowed = ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp'];
+        const ext = path.extname(file.originalname).toLowerCase();
+        if (!allowed.includes(ext)) {
+            return cb(new Error('Only image files allowed.'));
+        }
+        cb(null, true);
+    },
+}).single('media'); // ← back to single-file
+
+/**
+ * POST /api/user/llm-scan
+ * Body: { title, description }, File: media ('.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp')
+ */
+function createLLMPhoto(req, res, next) {
+    upload(req, res, async function (err) {
+        if (err) return res.status(400).json({ error: err.message });
+
+        try {
+            const userId = req.user.user_id;
+            const email  = req.user.email || req.body.email;
+            if (typeof email !== 'string') {
+                return res.status(400).json({ error: 'User email is required.' });
+            }
+
+            const { description } = req.body;
+
+            // single-file check
+            if (!req.file) {
+                return res.status(400).json({ error: 'Media file is required.' });
+            }
+
+            // build relative path
+            const dateFolder   = new Date().toISOString().split('T')[0];
+            const relativePath = path.join('uploads', email, dateFolder, req.file.filename);
+
+            // insert one row
+            const [result] = await pool.execute(
+                `INSERT INTO LLM_SCANS (
+                    user_id,
+                    description,
+                    filePath,
+                    createdAt,
+                    updatedAt
+                ) VALUES (?, ?, ?, NOW(), NOW())`,
+                [userId, description, relativePath]
+            );
+
+            res.status(201).json({
+                message: 'LLM scan created.',
+                llm_id: result.insertId,
+                file:   path.join(email, dateFolder, req.file.filename),
+            });
+        } catch (error) {
+            next(error);
+        }
+    });
+}
+
+
+/**
+ * POST /api/user/llm-ask-question
+ */
+async function LLMAskQuestion(req, res, next) {
+    try {
+        const apiUrl = 'http://192.168.50.12:11434/api/chat';
+        let { conversationId, content, base64 } = req.body;
+
+        if (typeof content !== 'string' || !content.trim()) {
+            return res.status(400).json({ error: 'content is required.' });
+        }
+
+        // 1) ensure we have a conversationId
+        if (typeof conversationId !== 'string' || !conversationId.trim()) {
+            conversationId = uuidv4();
+        }
+
+        // 2) load previous messages (with raw-base64 in images)
+        const [rows] = await pool.execute(
+            `SELECT role, content, images
+             FROM conversation_messages
+             WHERE conversation_id = ?
+             ORDER BY createdAt ASC
+                 LIMIT 50`,
+            [conversationId]
+        );
+
+        const messages = [];
+        let usedHistoryImage = false;
+
+        // system prompt
+        messages.push({
+            role: 'system',
+            content: 'Answer only with a short response based solely on the question. No explanations or extra details. If it is not a question, understand it first before replying.'
+        });
+
+        // 2a) rehydrate history, include the one stored image as ["rawBase64"]
+        for (const r of rows) {
+            const msg = { role: r.role, content: r.content };
+
+            if (!usedHistoryImage && r.images) {
+                msg.images = [ r.images ]; // wrap raw string once
+                usedHistoryImage = true;
+            }
+
+            messages.push(msg);
+        }
+
+        // 3) append the new user message
+        const userMsg = { role: 'user', content };
+        if (typeof base64 === 'string' && base64.trim()) {
+            userMsg.images = [ base64 ];
+        }
+        messages.push(userMsg);
+
+        // 4) call the LLM
+        const payload = {
+            model: userMsg.images ? 'gemma3:4b' : 'gemma3:4b',
+            stream: false,
+            messages
+        };
+        const llmResp = await axios.post(apiUrl, payload, {
+            headers: { 'Content-Type': 'application/json' }
+        });
+        const assistantContent = llmResp.data?.message?.content;
+        if (typeof assistantContent !== 'string') {
+            return res.status(502).json({ error: 'Invalid LLM response' });
+        }
+
+        // 5) persist both the user message and the assistant reply
+        //    only save raw-base64 on the very first turn-with-image
+        let imageToSave = null;
+        if (userMsg.images) {
+            const [[{ count }]] = await pool.execute(
+                `SELECT COUNT(*) AS count
+                 FROM conversation_messages
+                 WHERE conversation_id = ?
+                   AND images IS NOT NULL`,
+                [conversationId]
+            );
+            if (count === 0) {
+                imageToSave = userMsg.images[0]; // raw string, not JSON
+            }
+        }
+
+        await pool.execute(
+            `INSERT INTO conversation_messages
+                 (conversation_id, role, content, images, createdAt)
+             VALUES (?, 'user', ?, ?, NOW())`,
+            [conversationId, content, imageToSave]
+        );
+        await pool.execute(
+            `INSERT INTO conversation_messages
+                 (conversation_id, role, content, createdAt)
+             VALUES (?, 'assistant', ?, NOW())`,
+            [conversationId, assistantContent]
+        );
+
+        // 6) return the answer + conversationId for next turn
+        res.json({ conversationId, answer: assistantContent });
+    } catch (err) {
+        next(err);
+    }
+}
+
+
+
+
+
 module.exports = {
     getDashboard,
     getProfile,
@@ -724,4 +943,6 @@ module.exports = {
     getBoundUsers,
     getScansByUser,
     getScanStats,
+    createLLMPhoto,
+    LLMAskQuestion,
 };

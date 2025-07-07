@@ -33,6 +33,12 @@ router.put('/user/scans/:scanId', userController.updateScan);
 // DELETE /api/user/scans/:scanId
 router.delete('/user/scans/:scanId', userController.deleteScan);
 
+// GET  /user/upload-llm-photo
+router.post('/user/upload-llm-photo', userController.createLLMPhoto);
+
+// GET  /user/llm-ask-question
+router.post('/user/llm-ask-question', userController.LLMAskQuestion);
+
 // ─── Guardian binding routes ──────────────────────────────────────────────
 
 // POST /api/user/guardian/bind-request

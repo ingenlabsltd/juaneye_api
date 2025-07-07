@@ -832,12 +832,12 @@ async function LLMAskQuestion(req, res, next) {
             return res.status(400).json({ error: 'content is required.' });
         }
 
-        // 1) ensure we have a conversationId
+        // 1) ensure conversationId
         if (typeof conversationId !== 'string' || !conversationId.trim()) {
             conversationId = uuidv4();
         }
 
-        // 2) load previous messages (with raw-base64 in images)
+        // 2) load previous messages
         const [rows] = await pool.execute(
             `SELECT role, content, images
              FROM conversation_messages
@@ -853,10 +853,10 @@ async function LLMAskQuestion(req, res, next) {
         // system prompt
         messages.push({
             role: 'system',
-            content: 'Answer only with a short response based solely on the question. No explanations or extra details. If it is not a question, understand it first before replying.'
+            content: 'Answer only with a short response based solely on the question. No explanations or extra details.'
         });
 
-        // 2a) rehydrate history
+        // rehydrate history
         for (const r of rows) {
             const msg = { role: r.role, content: r.content };
             if (!usedHistoryImage && r.images) {
@@ -866,7 +866,7 @@ async function LLMAskQuestion(req, res, next) {
             messages.push(msg);
         }
 
-        // 3) append the new user message & persist it
+        // 3) append & persist user message
         const userMsg = { role: 'user', content };
         let imageToSave = null;
         if (typeof base64 === 'string' && base64.trim()) {
@@ -889,11 +889,7 @@ async function LLMAskQuestion(req, res, next) {
         );
 
         // 4) call the LLM
-        const payload = {
-            model: 'llava',
-            stream: Boolean(isStream),
-            messages
-        };
+        const payload = { model: 'llava', stream: Boolean(isStream), messages };
 
         if (isStream) {
             // STREAMING
@@ -904,53 +900,72 @@ async function LLMAskQuestion(req, res, next) {
 
             res.setHeader('Content-Type', 'application/json; charset=utf-8');
             let buffer = '';
+            let wordBuffer = '';
             let fullContent = '';
+
+            const flushWords = () => {
+                const parts = wordBuffer.split(/\s+/);
+                // if last part is incomplete (no trailing space), leave it
+                const completeWords = parts.slice(0, -1);
+                const leftover = parts.slice(-1)[0] || '';
+                completeWords.forEach(word => {
+                    if (word) {
+                        res.write(JSON.stringify({ conversationId, answer: word, done: false }) + '\n');
+                        fullContent += word + ' ';
+                    }
+                });
+                wordBuffer = leftover;
+            };
 
             llmResp.data.on('data', async (chunk) => {
                 buffer += chunk.toString('utf8');
-                const lines = buffer.split('\n');
-                buffer = lines.pop();
-
-                for (const line of lines.filter(Boolean)) {
+                let newlineIndex;
+                while ((newlineIndex = buffer.indexOf('\n')) !== -1) {
+                    const line = buffer.slice(0, newlineIndex).trim();
+                    buffer = buffer.slice(newlineIndex + 1);
                     let parsed;
-                    try {
-                        parsed = JSON.parse(line);
-                    } catch {
-                        continue;
-                    }
-                    const text = parsed.message?.content || '';
+                    try { parsed = JSON.parse(line); } catch { continue; }
+                    const text = (parsed.message?.content || '').replace(/[^\w\s]/g, '');
                     const done = Boolean(parsed.done);
 
-                    // accumulate full text for DB
-                    fullContent += text;
-
-                    // stream only the fragment
-                    res.write(JSON.stringify({ conversationId, answer: text, done }) + '\n');
+                    wordBuffer += text;
+                    flushWords();
 
                     if (done) {
-                        // persist the assembled reply without extra quotes
+                        // send any leftover as final fragment
+                        if (wordBuffer) {
+                            res.write(JSON.stringify({ conversationId, answer: wordBuffer, done: true }) + '\n');
+                            fullContent += wordBuffer;
+                            wordBuffer = '';
+                        }
+                        // persist assembled reply
                         await pool.execute(
                             `INSERT INTO conversation_messages
                                  (conversation_id, role, content, createdAt)
                              VALUES (?, 'assistant', ?, NOW())`,
-                            [conversationId, fullContent]
+                            [conversationId, fullContent.trim()]
                         );
                     }
                 }
             });
 
-            llmResp.data.on('end', () => res.end());
+            llmResp.data.on('end', () => {
+                // explicit final done if not already sent
+                if (!buffer.trim()) {
+                    res.write(JSON.stringify({ conversationId, answer: '', done: true }) + '\n');
+                }
+                res.end();
+            });
         } else {
             // NON-STREAMING
-            const llmResp = await axios.post(apiUrl, payload, {
+            const resp = await axios.post(apiUrl, payload, {
                 headers: { 'Content-Type': 'application/json' }
             });
-            const assistantContent = llmResp.data?.message?.content;
+            const assistantContent = resp.data?.message?.content;
             if (typeof assistantContent !== 'string') {
                 return res.status(502).json({ error: 'Invalid LLM response' });
             }
 
-            // persist assistant reply without encapsulating quotes
             await pool.execute(
                 `INSERT INTO conversation_messages
                      (conversation_id, role, content, createdAt)

@@ -853,7 +853,7 @@ async function LLMAskQuestion(req, res, next) {
         // system prompt
         messages.push({
             role: 'system',
-            content: 'Answer only with a short response based solely on the question. No explanations or extra details.'
+            content: 'Answer only with a short response based solely on the question. No explanations or extra details. Dont use special character at response, maximum of 20-30 words for your response strictly.'
         });
 
         // rehydrate history
@@ -869,8 +869,9 @@ async function LLMAskQuestion(req, res, next) {
         // 3) append & persist user message
         const userMsg = { role: 'user', content };
         let imageToSave = null;
+
+        // only attach an image if none have been saved yet
         if (typeof base64 === 'string' && base64.trim()) {
-            userMsg.images = [base64];
             const [[{ count }]] = await pool.execute(
                 `SELECT COUNT(*) AS count
                  FROM conversation_messages
@@ -878,9 +879,14 @@ async function LLMAskQuestion(req, res, next) {
                    AND images IS NOT NULL`,
                 [conversationId]
             );
-            if (count === 0) imageToSave = base64;
+            if (count === 0) {
+                userMsg.images = [base64];
+                imageToSave = base64;
+            }
         }
+
         messages.push(userMsg);
+
         await pool.execute(
             `INSERT INTO conversation_messages
                  (conversation_id, role, content, images, createdAt)
@@ -890,7 +896,7 @@ async function LLMAskQuestion(req, res, next) {
 
         // 4) call the LLM
         const payload = { model: 'llava', stream: Boolean(isStream), messages };
-
+        console.log(payload)
         if (isStream) {
             // STREAMING
             const llmResp = await axios.post(apiUrl, payload, {

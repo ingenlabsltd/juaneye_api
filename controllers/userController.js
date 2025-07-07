@@ -826,7 +826,7 @@ function createLLMPhoto(req, res, next) {
 async function LLMAskQuestion(req, res, next) {
     try {
         const apiUrl = 'http://192.168.50.12:11434/api/chat';
-        let { conversationId, content, base64 } = req.body;
+        let { conversationId, content, base64, isStream } = req.body;
 
         if (typeof content !== 'string' || !content.trim()) {
             return res.status(400).json({ error: 'content is required.' });
@@ -856,43 +856,21 @@ async function LLMAskQuestion(req, res, next) {
             content: 'Answer only with a short response based solely on the question. No explanations or extra details. If it is not a question, understand it first before replying.'
         });
 
-        // 2a) rehydrate history, include the one stored image as ["rawBase64"]
+        // 2a) rehydrate history
         for (const r of rows) {
             const msg = { role: r.role, content: r.content };
-
             if (!usedHistoryImage && r.images) {
-                msg.images = [ r.images ]; // wrap raw string once
+                msg.images = [r.images];
                 usedHistoryImage = true;
             }
-
             messages.push(msg);
         }
 
-        // 3) append the new user message
+        // 3) append the new user message & persist it
         const userMsg = { role: 'user', content };
-        if (typeof base64 === 'string' && base64.trim()) {
-            userMsg.images = [ base64 ];
-        }
-        messages.push(userMsg);
-
-        // 4) call the LLM
-        const payload = {
-            model: userMsg.images ? 'gemma3:4b' : 'gemma3:4b',
-            stream: false,
-            messages
-        };
-        const llmResp = await axios.post(apiUrl, payload, {
-            headers: { 'Content-Type': 'application/json' }
-        });
-        const assistantContent = llmResp.data?.message?.content;
-        if (typeof assistantContent !== 'string') {
-            return res.status(502).json({ error: 'Invalid LLM response' });
-        }
-
-        // 5) persist both the user message and the assistant reply
-        //    only save raw-base64 on the very first turn-with-image
         let imageToSave = null;
-        if (userMsg.images) {
+        if (typeof base64 === 'string' && base64.trim()) {
+            userMsg.images = [base64];
             const [[{ count }]] = await pool.execute(
                 `SELECT COUNT(*) AS count
                  FROM conversation_messages
@@ -900,26 +878,88 @@ async function LLMAskQuestion(req, res, next) {
                    AND images IS NOT NULL`,
                 [conversationId]
             );
-            if (count === 0) {
-                imageToSave = userMsg.images[0]; // raw string, not JSON
-            }
+            if (count === 0) imageToSave = base64;
         }
-
+        messages.push(userMsg);
         await pool.execute(
             `INSERT INTO conversation_messages
                  (conversation_id, role, content, images, createdAt)
              VALUES (?, 'user', ?, ?, NOW())`,
             [conversationId, content, imageToSave]
         );
-        await pool.execute(
-            `INSERT INTO conversation_messages
-                 (conversation_id, role, content, createdAt)
-             VALUES (?, 'assistant', ?, NOW())`,
-            [conversationId, assistantContent]
-        );
 
-        // 6) return the answer + conversationId for next turn
-        res.json({ conversationId, answer: assistantContent });
+        // 4) call the LLM
+        const payload = {
+            model: 'llava',
+            stream: Boolean(isStream),
+            messages
+        };
+
+        if (isStream) {
+            // STREAMING
+            const llmResp = await axios.post(apiUrl, payload, {
+                headers: { 'Content-Type': 'application/json' },
+                responseType: 'stream'
+            });
+
+            res.setHeader('Content-Type', 'application/json; charset=utf-8');
+            let buffer = '';
+            let fullContent = '';
+
+            llmResp.data.on('data', async (chunk) => {
+                buffer += chunk.toString('utf8');
+                const lines = buffer.split('\n');
+                buffer = lines.pop();
+
+                for (const line of lines.filter(Boolean)) {
+                    let parsed;
+                    try {
+                        parsed = JSON.parse(line);
+                    } catch {
+                        continue;
+                    }
+                    const text = parsed.message?.content || '';
+                    const done = Boolean(parsed.done);
+
+                    // accumulate full text for DB
+                    fullContent += text;
+
+                    // stream only the fragment
+                    res.write(JSON.stringify({ conversationId, answer: text, done }) + '\n');
+
+                    if (done) {
+                        // persist the assembled reply without extra quotes
+                        await pool.execute(
+                            `INSERT INTO conversation_messages
+                                 (conversation_id, role, content, createdAt)
+                             VALUES (?, 'assistant', ?, NOW())`,
+                            [conversationId, fullContent]
+                        );
+                    }
+                }
+            });
+
+            llmResp.data.on('end', () => res.end());
+        } else {
+            // NON-STREAMING
+            const llmResp = await axios.post(apiUrl, payload, {
+                headers: { 'Content-Type': 'application/json' }
+            });
+            const assistantContent = llmResp.data?.message?.content;
+            if (typeof assistantContent !== 'string') {
+                return res.status(502).json({ error: 'Invalid LLM response' });
+            }
+
+            // persist assistant reply without encapsulating quotes
+            await pool.execute(
+                `INSERT INTO conversation_messages
+                     (conversation_id, role, content, createdAt)
+                 VALUES (?, 'assistant', ?, NOW())`,
+                [conversationId, assistantContent]
+            );
+
+            res.json({ conversationId, answer: assistantContent, done: true });
+        }
     } catch (err) {
         next(err);
     }

@@ -21,9 +21,6 @@ router.post('/user/object-scans', userController.createObjectScan);
 // GET  /api/user/scans
 router.get('/user/scans', userController.getUserScans);
 
-// GET  /api/user/scans/user?user_id=<id>
-router.get('/user/scans/user', userController.getScansByUser);
-
 // GET  /api/user/scans/:scanId
 router.get('/user/scans/:scanId', userController.getSingleScan);
 
@@ -34,7 +31,7 @@ router.put('/user/scans/:scanId', userController.updateScan);
 router.delete('/user/scans/:scanId', userController.deleteScan);
 
 // GET  /user/upload-llm-photo
-router.post('/user/upload-llm-photo', userController.createLLMPhoto);
+router.post('/user/photo-upload', userController.photoUpload);
 
 // GET  /user/llm-ask-question
 router.post('/user/llm-ask-question', userController.LLMAskQuestion);
@@ -52,5 +49,8 @@ router.get('/user/guardian/bound-users', userController.getBoundUsers);
 
 // GET  /api/user/guardian/scan-stats
 router.get('/user/guardian/scan-stats', userController.getScanStats);
+
+// GET  /api/user/guardian/all-scans/user?user_id=<id>
+router.get('/user/guardian/all-scans/user', userController.getScansByUser);
 
 module.exports = router;

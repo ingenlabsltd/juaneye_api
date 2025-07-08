@@ -599,9 +599,12 @@ async function getBoundUsers(req, res, next) {
 }
 
 /**
- * GET /api/user/scans/user
+ * GET /api/user/guardian/scans/user
  * Query: ?user_id=<number>
- * Returns scans for a specific user if requester is that user or bound Guardian.
+ * Returns:
+ *  - all Object/OCR scans for that user (or bound users, if you’re a Guardian), AND
+ *  - all LLM conversation threads (id + first user message), labeled type="LLM"
+ * in a single combined array, sorted by createdAt descending.
  */
 async function getScansByUser(req, res, next) {
     try {
@@ -616,41 +619,72 @@ async function getScansByUser(req, res, next) {
             if (accountType !== 'Guardian') {
                 return res.status(403).json({ error: 'Not authorized.' });
             }
-
             const [link] = await pool.execute(
-                `SELECT 1 FROM USER_GUARDIAN_LINK
-         WHERE guardian_id = ? AND user_id = ?`,
+                `SELECT 1
+                 FROM USER_GUARDIAN_LINK
+                 WHERE guardian_id = ?
+                   AND user_id     = ?`,
                 [requesterId, targetId]
             );
-
             if (!link.length) {
                 return res.status(403).json({ error: 'Not bound.' });
             }
         }
 
-        const [rows] = await pool.execute(
+        // 1) fetch object & OCR scans
+        const [scanRows] = await pool.execute(
             `SELECT
-                 scan_id AS scanId,
+                 scan_id           AS scanId,
                  recognizedObjects AS name,
                  text,
-                 'Object' AS type,
+                 'Object'          AS type,
                  createdAt
              FROM OBJECT_SCANS
              WHERE user_id = ?
              UNION ALL
              SELECT
-                 ocr_id AS scanId,
-                 recognizedText AS name,
+                 ocr_id            AS scanId,
+                 recognizedText    AS name,
                  text,
-                 'Text' AS type,
-                 dateTime AS createdAt
+                 'Text'            AS type,
+                 dateTime          AS createdAt
              FROM OCR_SCANS
              WHERE user_id = ?
              ORDER BY createdAt DESC`,
             [targetId, targetId]
         );
 
-        res.json(rows);
+        // 2) fetch LLM conversation summaries (first user message), *only* for this user
+        const [convoRows] = await pool.execute(
+            `SELECT
+                 cm.id,
+                 cm.conversation_id,
+                 cm.content         AS first_user_message,
+                 'LLM'              AS type,
+                 cm.createdAt
+             FROM (
+                      SELECT
+                          conversation_id,
+                          MIN(createdAt) AS firstAt
+                      FROM CONVERSATION_MESSAGES
+                      WHERE role = 'user'
+                        AND user_id = ?
+                      GROUP BY conversation_id
+                  ) AS t
+                      JOIN CONVERSATION_MESSAGES AS cm
+                           ON cm.conversation_id = t.conversation_id
+                               AND cm.createdAt      = t.firstAt
+                               AND cm.role           = 'user'
+             ORDER BY cm.createdAt DESC`,
+            [targetId]
+        );
+
+        // 3) merge & sort everything
+        const combined = [...scanRows, ...convoRows].sort((a, b) =>
+            new Date(b.createdAt) - new Date(a.createdAt)
+        );
+
+        res.json(combined);
     } catch (err) {
         next(err);
     }
@@ -771,10 +805,10 @@ const upload = multer({
 }).single('media'); // ← back to single-file
 
 /**
- * POST /api/user/llm-scan
+ * POST /api/user/photo-upload
  * Body: { title, description }, File: media ('.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp')
  */
-function createLLMPhoto(req, res, next) {
+function photoUpload(req, res, next) {
     upload(req, res, async function (err) {
         if (err) return res.status(400).json({ error: err.message });
 
@@ -825,7 +859,9 @@ function createLLMPhoto(req, res, next) {
  */
 async function LLMAskQuestion(req, res, next) {
     try {
-        const apiUrl = 'http://192.168.50.12:11434/api/chat';
+        const userId = req.user.user_id;
+
+        const apiUrl = 'http://192.168.50.40:11434/api/chat';
         let { conversationId, content, base64, isStream } = req.body;
 
         if (typeof content !== 'string' || !content.trim()) {
@@ -840,20 +876,33 @@ async function LLMAskQuestion(req, res, next) {
         // 2) load previous messages
         const [rows] = await pool.execute(
             `SELECT role, content, images
-             FROM conversation_messages
+             FROM CONVERSATION_MESSAGES
              WHERE conversation_id = ?
+               AND user_id = ?
              ORDER BY createdAt ASC
                  LIMIT 50`,
-            [conversationId]
+            [conversationId, userId]
         );
 
         const messages = [];
         let usedHistoryImage = false;
-
-        // system prompt
         messages.push({
             role: 'system',
-            content: 'Answer only with a short response based solely on the question. No explanations or extra details. Dont use special character at response, maximum of 20-30 words for your response strictly.'
+            content: [
+                'Say Hello, I\'m JuanEye, an AI assistant for blind and visually impaired users. On initial conversation.',
+                'Never mention Google or any specific developer.',
+                'Always attempt a description—never claim inability to help.',
+                'If image lighting is poor or dark, preface that accuracy may be limited.',
+                'Identify the main object, its color, shape, button layout, brand, and approximate size.',
+                'Identify if theres any person and give full details about the person.',
+                'Include tactile-friendly cues (button spacing, raised textures).',
+                'Offer concise alt-text but rename alt-text to Image Description without special characters and simple usage tips if relevant.',
+                'Use clear plain language; avoid visual metaphors.',
+                'Limit responses to 20–30 words.',
+                'Respond in clear English by default, then ask the user if they want a Tagalog translation. Only translate when the user says “please translate.” or any word with translate.',
+                'If user requested translation do not give again the english content. the next question will be again in english then proceed asking if translation is required.',
+                'ALWAYS AVOID USING SPECIAL CHARACTERS'
+            ].join(' ')
         });
 
         // rehydrate history
@@ -874,10 +923,11 @@ async function LLMAskQuestion(req, res, next) {
         if (typeof base64 === 'string' && base64.trim()) {
             const [[{ count }]] = await pool.execute(
                 `SELECT COUNT(*) AS count
-                 FROM conversation_messages
+                 FROM CONVERSATION_MESSAGES
                  WHERE conversation_id = ?
+                   AND user_id = ?
                    AND images IS NOT NULL`,
-                [conversationId]
+                [conversationId, userId]
             );
             if (count === 0) {
                 userMsg.images = [base64];
@@ -888,19 +938,19 @@ async function LLMAskQuestion(req, res, next) {
         messages.push(userMsg);
 
         await pool.execute(
-            `INSERT INTO conversation_messages
-                 (conversation_id, role, content, images, createdAt)
-             VALUES (?, 'user', ?, ?, NOW())`,
-            [conversationId, content, imageToSave]
+            `INSERT INTO CONVERSATION_MESSAGES
+                 (conversation_id, user_id, role, content, images, createdAt)
+             VALUES (?, ?, 'user', ?, ?, NOW())`,
+            [conversationId, userId, content, imageToSave]
         );
 
         // 4) call the LLM
-        const payload = { model: 'llava', stream: Boolean(isStream), messages };
+        const payload = { model: 'gemma3:12b', stream: Boolean(isStream), messages };
         console.log(payload)
         if (isStream) {
             // STREAMING
             const llmResp = await axios.post(apiUrl, payload, {
-                headers: { 'Content-Type': 'application/json' },
+                headers: { 'Content-Type': 'application/json', 'user_id': userId },
                 responseType: 'stream'
             });
 
@@ -946,10 +996,10 @@ async function LLMAskQuestion(req, res, next) {
                         }
                         // persist assembled reply
                         await pool.execute(
-                            `INSERT INTO conversation_messages
-                                 (conversation_id, role, content, createdAt)
-                             VALUES (?, 'assistant', ?, NOW())`,
-                            [conversationId, fullContent.trim()]
+                            `INSERT INTO CONVERSATION_MESSAGES
+                                 (conversation_id, user_id, role, content, createdAt)
+                             VALUES (?, ?, 'assistant', ?, NOW())`,
+                            [conversationId, userId, fullContent.trim()]
                         );
                     }
                 }
@@ -965,7 +1015,7 @@ async function LLMAskQuestion(req, res, next) {
         } else {
             // NON-STREAMING
             const resp = await axios.post(apiUrl, payload, {
-                headers: { 'Content-Type': 'application/json' }
+                headers: { 'Content-Type': 'application/json', 'user_id': userId }
             });
             const assistantContent = resp.data?.message?.content;
             if (typeof assistantContent !== 'string') {
@@ -973,21 +1023,25 @@ async function LLMAskQuestion(req, res, next) {
             }
 
             await pool.execute(
-                `INSERT INTO conversation_messages
-                     (conversation_id, role, content, createdAt)
-                 VALUES (?, 'assistant', ?, NOW())`,
-                [conversationId, assistantContent]
+                `INSERT INTO CONVERSATION_MESSAGES
+                     (conversation_id, user_id, role, content, createdAt)
+                 VALUES (?, ?, 'assistant', ?, NOW())`,
+                [conversationId, userId, assistantContent]
             );
 
-            res.json({ conversationId, answer: assistantContent, done: true });
+            res.json({
+                ok: true,
+                status: 200,
+                data: {
+                    conversationId,
+                    answer: assistantContent
+                }
+            });
         }
     } catch (err) {
         next(err);
     }
 }
-
-
-
 
 
 module.exports = {
@@ -1004,6 +1058,6 @@ module.exports = {
     getBoundUsers,
     getScansByUser,
     getScanStats,
-    createLLMPhoto,
+    photoUpload,
     LLMAskQuestion,
 };

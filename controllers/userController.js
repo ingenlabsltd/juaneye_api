@@ -889,7 +889,7 @@ async function LLMAskQuestion(req, res, next) {
         messages.push({
             role: 'system',
             content: [
-                'Say Hello, I\'m JuanEye, an AI assistant for blind and visually impaired users. On initial conversation.',
+                'Say Hello, Im JuanEye, an AI assistant for visually impaired users. On initial conversation.',
                 'Never mention Google or any specific developer.',
                 'Always attempt a description—never claim inability to help.',
                 'If image lighting is poor or dark, preface that accuracy may be limited.',
@@ -937,7 +937,7 @@ async function LLMAskQuestion(req, res, next) {
 
         messages.push(userMsg);
 
-        await pool.execute(
+        pool.execute(
             `INSERT INTO CONVERSATION_MESSAGES
                  (conversation_id, user_id, role, content, images, createdAt)
              VALUES (?, ?, 'user', ?, ?, NOW())`,
@@ -995,7 +995,7 @@ async function LLMAskQuestion(req, res, next) {
                             wordBuffer = '';
                         }
                         // persist assembled reply
-                        await pool.execute(
+                        pool.execute(
                             `INSERT INTO CONVERSATION_MESSAGES
                                  (conversation_id, user_id, role, content, createdAt)
                              VALUES (?, ?, 'assistant', ?, NOW())`,
@@ -1022,7 +1022,7 @@ async function LLMAskQuestion(req, res, next) {
                 return res.status(502).json({ error: 'Invalid LLM response' });
             }
 
-            await pool.execute(
+            pool.execute(
                 `INSERT INTO CONVERSATION_MESSAGES
                      (conversation_id, user_id, role, content, createdAt)
                  VALUES (?, ?, 'assistant', ?, NOW())`,

@@ -42,7 +42,9 @@ module.exports = {
      * Creates a new user (email+hashed password) and returns userId + JWT.
      */
     signup: async (req, res, next) => {
-        const { email, password, accountType } = req.body;
+        const { email, password } = req.body;
+        let accountType = req.body.accountType || "User";
+
         if (!email || !password) {
             return res
                 .status(400)
@@ -164,9 +166,9 @@ module.exports = {
                 parseInt(process.env.OTP_EXPIRATION_MINUTES, 10) * 60_000
             );
             await pool.execute(
-                `INSERT INTO OTPS 
-           (user_id, codeValue, expirationTime, isUsed, createdAt, updatedAt)
-         VALUES (?, ?, ?, FALSE, NOW(), NOW())`,
+                `INSERT INTO OTPS
+                     (user_id, codeValue, expirationTime, isUsed, createdAt, updatedAt)
+                 VALUES (?, ?, ?, FALSE, NOW(), NOW())`,
                 [userId, codeValue, expirationTime]
             );
 
@@ -205,13 +207,13 @@ module.exports = {
 
             // 2) Find matching OTP
             const [otps] = await pool.execute(
-                `SELECT otp_id, expirationTime 
-         FROM OTPS 
-         WHERE user_id = ? 
-           AND codeValue = ? 
-           AND isUsed = FALSE 
-         ORDER BY createdAt DESC 
-         LIMIT 1`,
+                `SELECT otp_id, expirationTime
+                 FROM OTPS
+                 WHERE user_id = ?
+                   AND codeValue = ?
+                   AND isUsed = FALSE
+                 ORDER BY createdAt DESC
+                     LIMIT 1`,
                 [userId, codeValue]
             );
             if (otps.length === 0) {

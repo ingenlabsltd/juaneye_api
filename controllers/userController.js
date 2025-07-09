@@ -890,7 +890,7 @@ async function LLMAskQuestion(req, res, next) {
         messages.push({
             role: 'system',
             content: [
-                'Say Hello, Im JuanEye, an AI assistant for visually impaired users. On initial conversation.',
+                `<speak>Say Hello, Im <phoneme alphabet="ipa" ph="wɑn aɪ">JuanEye</phoneme>, an AI assistant for visually impaired users. On initial conversation.</speak>`,
                 'Never mention Google or any specific developer.',
                 'Always attempt a description—never claim inability to help.',
                 'If image lighting is poor or dark, preface that accuracy may be limited.',

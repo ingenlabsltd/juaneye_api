@@ -116,39 +116,59 @@ module.exports = {
      */
     getDashboardStats: async (req, res, next) => {
         try {
-            // 1) Count "online" users (deviceUuid IS NOT NULL)
+            // 1) Count "online" users based on recent activity in scans tables
+            //    Any user with ≥1 entry in OBJECT_SCANS, OCR_SCANS, or LLM_SCANS
+            //    in the past 1 hour is considered online.
+            const scanWindow = '1 HOUR';
             const [onlineRows] = await pool.execute(
-                `SELECT COUNT(*) AS cnt FROM USERS WHERE deviceUuid IS NOT NULL`
+                `SELECT COUNT(DISTINCT user_id) AS cnt FROM (
+                                                                SELECT user_id
+                                                                FROM OBJECT_SCANS
+                                                                WHERE createdAt >= DATE_SUB(NOW(), INTERVAL ${scanWindow})
+                                                                UNION
+                                                                SELECT user_id
+                                                                FROM OCR_SCANS
+                                                                WHERE createdAt >= DATE_SUB(NOW(), INTERVAL ${scanWindow})
+                                                                UNION
+                                                                SELECT user_id
+                                                                FROM CONVERSATION_MESSAGES
+                                                                WHERE createdAt >= DATE_SUB(NOW(), INTERVAL ${scanWindow})
+                                                            ) AS recent_activity`
             );
             const onlineUsers = onlineRows[0].cnt;
 
             // 2) Total users
-            const [totalRows] = await pool.execute(`SELECT COUNT(*) AS cnt FROM USERS`);
+            const [totalRows] = await pool.execute(
+                `SELECT COUNT(*) AS cnt FROM USERS`
+            );
             const totalUsers = totalRows[0].cnt;
 
             // 3) Free users
             const [freeRows] = await pool.execute(
-                `SELECT COUNT(*) AS cnt FROM USERS WHERE isPremiumUser = FALSE`
+                `SELECT COUNT(*) AS cnt
+                 FROM USERS
+                 WHERE isPremiumUser = FALSE`
             );
             const freeUsers = freeRows[0].cnt;
 
             // 4) Premium users
             const [premiumRows] = await pool.execute(
-                `SELECT COUNT(*) AS cnt FROM USERS WHERE isPremiumUser = TRUE`
+                `SELECT COUNT(*) AS cnt
+                 FROM USERS
+                 WHERE isPremiumUser = TRUE`
             );
             const premiumUsers = premiumRows[0].cnt;
 
             // 5) New signups last 7 days, formatted 'YYYY-MM-DD'
             const [signupRows] = await pool.execute(
                 `SELECT
-           DATE_FORMAT(createdAt, '%Y-%m-%d') AS date,
-           COUNT(*) AS count
-         FROM USERS
-         WHERE createdAt >= DATE_SUB(CURDATE(), INTERVAL 6 DAY)
-         GROUP BY DATE_FORMAT(createdAt, '%Y-%m-%d')
-         ORDER BY DATE_FORMAT(createdAt, '%Y-%m-%d')`
+               DATE_FORMAT(createdAt, '%Y-%m-%d') AS date,
+               COUNT(*)                    AS count
+             FROM USERS
+            WHERE createdAt >= DATE_SUB(CURDATE(), INTERVAL 6 DAY)
+            GROUP BY DATE_FORMAT(createdAt, '%Y-%m-%d')
+            ORDER BY DATE_FORMAT(createdAt, '%Y-%m-%d')`
             );
-            // Example: [ { date: '2025-06-01', count: 5 }, ... ]
 
             return res.json({
                 onlineUsers,

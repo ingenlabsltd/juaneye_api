@@ -277,7 +277,7 @@ describe('User Integration Tests', function () {
         const sId = objRow[0].id;
 
         const res = await request(app)
-            .get(`/api/user/scans/user?user_id=${regularUserId}`)
+            .get(`/api/user/guardian/scans/user?user_id=${regularUserId}`)
             .set('Authorization', `Bearer ${userToken}`)
             .expect(200);
 

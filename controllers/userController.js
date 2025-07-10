@@ -11,7 +11,7 @@ const axios = require('axios');
 
 dotenv.config();
 
-// ─── Helpers for Guardian Binding OTP ─────────────────────────────────────
+// ─── Helpers for Guardian Binding OTP ─────────────────────────────────────-
 function generateOTP() {
     return Math.floor(100000 + Math.random() * 900000).toString();
 }

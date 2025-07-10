@@ -53,4 +53,16 @@ router.get('/user/guardian/scan-stats', userController.getScanStats);
 // GET  /api/user/guardian/all-scans/user?user_id=<id>
 router.get('/user/guardian/all-scans/user', userController.getScansByUser);
 
+// POST /api/user/guardian/llm-ask-question
+router.post('/user/guardian/llm-ask-question', userController.guardianLLMAskQuestion);
+
+// POST /api/user/guardian/llm-ask-question
+router.post('/user/guardian/llm-ask-question', userController.guardianLLMAskQuestion);
+
+// GET /api/user/guardian/:conversationId/image
+router.get('/user/guardian/:conversationId/image', userController.getConversationImage)
+
+// GET /api/user/guardian/conversation/:conversationId/history
+router.get('/user/guardian/conversation/:conversationId/history', userController.getConversationHistory)
+
 module.exports = router;

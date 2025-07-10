@@ -860,8 +860,8 @@ function photoUpload(req, res, next) {
 async function LLMAskQuestion(req, res, next) {
     try {
         const userId = req.user.user_id;
-
-        const apiUrl = 'http://192.168.50.40:11434/api/chat';
+        // 6900XT Personal PC
+        const apiUrl = 'https://curious-mutually-platypus.ngrok-free.app/api/chat';
         let { conversationId, content, base64, isStream } = req.body;
 
         if (typeof content !== 'string' || !content.trim()) {
@@ -1053,6 +1053,347 @@ async function LLMAskQuestion(req, res, next) {
     }
 }
 
+/**
+ * POST /api/user/guardian/llm-ask-question
+ * Guardians ask on behalf of a bound user.
+ */
+async function guardianLLMAskQuestion(req, res, next) {
+    try {
+        // 6900XT Personal PC
+        const apiUrl = 'https://curious-mutually-platypus.ngrok-free.app/api/chat';
+        const { user_id: guardianId, accountType } = req.user;
+
+        // extract and validate target user
+        const { user_id: targetId, conversationId, content, base64, isStream } = req.body;
+        if (typeof targetId !== 'number' || isNaN(targetId)) {
+            return res.status(400).json({ error: 'Valid user_id is required.' });
+        }
+
+        // verify binding
+        const [link] = await pool.execute(
+            `SELECT 1
+             FROM USER_GUARDIAN_LINK
+             WHERE guardian_id = ?
+               AND user_id     = ?`,
+            [guardianId, targetId]
+        );
+        if (!link.length) {
+            return res.status(403).json({ error: 'Not bound to this user.' });
+        }
+
+        // ensure content
+        if (typeof content !== 'string' || !content.trim()) {
+            return res.status(400).json({ error: 'content is required.' });
+        }
+
+        // 1) ensure conversationId
+        let convoId = conversationId;
+        if (typeof convoId !== 'string' || !convoId.trim()) {
+            convoId = uuidv4();
+        }
+
+        // 2) load previous messages for target user
+        const [rows] = await pool.execute(
+            `SELECT role, content, images
+             FROM CONVERSATION_MESSAGES
+             WHERE conversation_id = ?
+               AND user_id = ?
+             ORDER BY createdAt ASC
+                 LIMIT 50`,
+            [convoId, targetId]
+        );
+
+        const messages = [];
+        let usedHistoryImage = false;
+
+        messages.push({
+            role: 'system',
+            content: [
+                `<speak>Say Hello, Im <phoneme alphabet="ipa" ph="wɑn aɪ">JuanEye</phoneme>, an AI assistant for visually impaired users. On initial conversation.</speak>`,
+                'Never mention Google or any specific developer.',
+                'Always attempt a description—never claim inability to help.',
+                'If image lighting is poor or dark, preface that accuracy may be limited.',
+                'Identify the main object, its color, shape, button layout, brand, and approximate size.',
+                'Identify if there’s any person and give full details about the person.',
+                'Include tactile-friendly cues (button spacing, raised textures).',
+                'Offer concise alt-text but rename alt-text to Image Description without special characters and simple usage tips if relevant.',
+                'Use clear plain language; avoid visual metaphors.',
+                'Limit responses to 20–100 words.',
+                'If the message content includes an OCR: field, incorporate that text into your response as additional information and for cross reference on your builtin OCR extraction.',
+                'If the user asks to read text (e.g. "pwede mo bang basahin", "can you read") or similar idea, prioritize extracting and reading the OCR text first.',
+                'If the OCR text includes an "Ingredients" heading without using ** ** *, split the list into individual items and note each ingredient’s basic function or category using a colon only, like "Ingredient: function".',
+                'Spatial orientation cues: always describe spatial relationships (e.g. "to the left," "above," "next to the button") so users can build a clear mental map.',
+                'Environmental context: note ambient factors like lighting, reflections, background noise, or glare that could affect perception or accuracy.',
+                'Text readability details: when reading text, mention font size (small/large), contrast (high/low), and any special formatting (bold, italics, bullets).',
+                'Hazard warnings: if you see potential hazards (hot surfaces, sharp edges, moving machinery), warn the user immediately.',
+                'Interaction guidance: offer step-by-step instructions for interacting with objects (e.g. "press the topmost button," "turn the knob clockwise").',
+                'Confirm understanding: ask "Did that help?" or "Would you like more detail on any part?" at the end to ensure clarity.',
+                'AVOID USING SPECIAL CHARACTERS, Even at heading or headers.',
+                'Respond in clear English by default, then ask the user if they want a Tagalog translation. Only translate when the user says “please translate.” or any word containing translate.',
+                'If user requested translation do not give the English content again. The next question will be in English then proceed asking if translation is required.',
+            ].join(' ')
+        });
+
+        // rehydrate history
+        for (const r of rows) {
+            const msg = { role: r.role, content: r.content };
+            if (!usedHistoryImage && r.images) {
+                msg.images = [r.images];
+                usedHistoryImage = true;
+            }
+            messages.push(msg);
+        }
+
+        // 3) append & persist guardian-as-user message
+        const userMsg = { role: 'user', content };
+        let imageToSave = null;
+
+        if (typeof base64 === 'string' && base64.trim()) {
+            const [[{ count }]] = await pool.execute(
+                `SELECT COUNT(*) AS count
+                 FROM CONVERSATION_MESSAGES
+                 WHERE conversation_id = ?
+                   AND user_id = ?
+                   AND images IS NOT NULL`,
+                [convoId, targetId]
+            );
+            if (count === 0) {
+                userMsg.images = [base64];
+                imageToSave = base64;
+            }
+        }
+
+        messages.push(userMsg);
+
+        pool.execute(
+            `INSERT INTO CONVERSATION_MESSAGES
+                 (conversation_id, user_id, role, content, images, createdAt)
+             VALUES (?, ?, 'user', ?, ?, NOW())`,
+            [convoId, targetId, content, imageToSave]
+        );
+
+        // 4) call the LLM
+        const payload = { model: 'gemma3:12b', stream: false, messages };
+
+        if (isStream) {
+            // STREAMING
+            const llmResp = await axios.post(apiUrl, payload, {
+                headers: { 'Content-Type': 'application/json', 'user_id': targetId },
+                responseType: 'stream'
+            });
+
+            res.setHeader('Content-Type', 'application/json; charset=utf-8');
+            let buffer = '';
+            let wordBuffer = '';
+            let fullContent = '';
+
+            const flushWords = () => {
+                const parts = wordBuffer.split(/\s+/);
+                const complete = parts.slice(0, -1);
+                const leftover = parts.slice(-1)[0] || '';
+                for (const w of complete) {
+                    res.write(JSON.stringify({ conversationId: convoId, answer: w, done: false }) + '\n');
+                    fullContent += w + ' ';
+                }
+                wordBuffer = leftover;
+            };
+
+            llmResp.data.on('data', chunk => {
+                buffer += chunk.toString('utf8');
+                let idx;
+                while ((idx = buffer.indexOf('\n')) !== -1) {
+                    const line = buffer.slice(0, idx).trim();
+                    buffer = buffer.slice(idx + 1);
+                    try {
+                        const parsed = JSON.parse(line);
+                        const text = (parsed.message?.content || '').replace(/[^\w\s]/g, '');
+                        const done = Boolean(parsed.done);
+                        wordBuffer += text;
+                        flushWords();
+                        if (done) {
+                            if (wordBuffer) {
+                                res.write(JSON.stringify({ conversationId: convoId, answer: wordBuffer, done: true }) + '\n');
+                                fullContent += wordBuffer;
+                                wordBuffer = '';
+                            }
+                            // persist
+                            pool.execute(
+                                `INSERT INTO CONVERSATION_MESSAGES
+                                     (conversation_id, user_id, role, content, createdAt)
+                                 VALUES (?, ?, 'assistant', ?, NOW())`,
+                                [convoId, targetId, fullContent.trim()]
+                            );
+                        }
+                    } catch {}
+                }
+            });
+
+            llmResp.data.on('end', () => {
+                if (!buffer.trim()) {
+                    res.write(JSON.stringify({ conversationId: convoId, answer: '', done: true }) + '\n');
+                }
+                res.end();
+            });
+
+        } else {
+            // NON-STREAMING
+            const resp = await axios.post(apiUrl, payload, {
+                headers: { 'Content-Type': 'application/json', 'user_id': targetId }
+            });
+            const assistantContent = resp.data?.message?.content;
+            if (typeof assistantContent !== 'string') {
+                return res.status(502).json({ error: 'Invalid LLM response' });
+            }
+
+             pool.execute(
+                `INSERT INTO CONVERSATION_MESSAGES
+                     (conversation_id, user_id, role, content, createdAt)
+                 VALUES (?, ?, 'assistant', ?, NOW())`,
+                [convoId, targetId, assistantContent]
+            );
+            console.log(assistantContent)
+            res.json({
+                ok: true,
+                status: 200,
+                data: {
+                    conversationId: convoId,
+                    answer: assistantContent
+                }
+            });
+        }
+
+    } catch (err) {
+        next(err);
+    }
+}
+
+/**
+ * GET /api/user/guardian/conversation/:conversationId/image
+ * Guardians only: fetch the single most recent image for a given conversation
+ */
+async function getConversationImage(req, res, next) {
+    try {
+        const { user_id: guardianId, accountType } = req.user;
+
+        const { conversationId } = req.params;
+        if (!conversationId || typeof conversationId !== 'string') {
+            return res.status(400).json({ error: 'conversationId is required.' });
+        }
+
+        // 1) find the owner of this conversation
+        const [[ownerRow]] = await pool.execute(
+            `SELECT user_id 
+               FROM CONVERSATION_MESSAGES 
+              WHERE conversation_id = ? 
+              LIMIT 1`,
+            [conversationId]
+        );
+        if (!ownerRow) {
+            return res.status(404).json({ error: 'Conversation not found.' });
+        }
+        const ownerId = ownerRow.user_id;
+
+        // 2) verify guardian is bound to that owner
+        const [linkRows] = await pool.execute(
+            `SELECT 1 
+               FROM USER_GUARDIAN_LINK 
+              WHERE guardian_id = ? 
+                AND user_id     = ?`,
+            [guardianId, ownerId]
+        );
+        if (!linkRows.length) {
+            return res.status(403).json({ error: 'Not bound to this user.' });
+        }
+
+        // 3) fetch only the most recent image
+        const [[imgRow]] = await pool.execute(
+            `SELECT images 
+               FROM CONVERSATION_MESSAGES 
+              WHERE conversation_id = ? 
+                AND images IS NOT NULL 
+              ORDER BY createdAt DESC 
+              LIMIT 1`,
+            [conversationId]
+        );
+
+        if (!imgRow) {
+            return res.status(404).json({ error: 'No image found in this conversation.' });
+        }
+
+        res.json({
+            conversationId,
+            image: imgRow.images
+        });
+    } catch (err) {
+        next(err);
+    }
+}
+
+/**
+ * GET /api/user/guardian/conversation/:conversationId/history
+ * Returns conversation history for a Guardian, excluding the initial user message.
+ */
+async function getConversationHistory(req, res, next) {
+    try {
+        const { user_id: guardianId, accountType } = req.user;
+        const { conversationId } = req.params;
+
+        if (typeof conversationId !== 'string' || !conversationId.trim()) {
+            return res.status(400).json({ error: 'conversationId is required.' });
+        }
+
+        // 1) find the owner of this conversation
+        const [[ownerRow]] = await pool.execute(
+            `SELECT user_id
+               FROM CONVERSATION_MESSAGES
+              WHERE conversation_id = ?
+              LIMIT 1`,
+            [conversationId]
+        );
+        if (!ownerRow) {
+            return res.status(404).json({ error: 'Conversation not found.' });
+        }
+        const ownerId = ownerRow.user_id;
+
+        // 2) verify Guardian is bound to that owner
+        const [linkRows] = await pool.execute(
+            `SELECT 1
+               FROM USER_GUARDIAN_LINK
+              WHERE guardian_id = ?
+                AND user_id     = ?`,
+            [guardianId, ownerId]
+        );
+        if (!linkRows.length) {
+            return res.status(403).json({ error: 'Not bound to this user.' });
+        }
+
+        // 3) fetch all messages in chronological order
+        const [allMessages] = await pool.execute(
+            `SELECT
+                 role,
+                 content,
+                 images,
+                 createdAt
+             FROM CONVERSATION_MESSAGES
+             WHERE conversation_id = ?
+             ORDER BY createdAt ASC`,
+            [conversationId]
+        );
+
+        // 4) drop the very first user message from history
+        let history = allMessages;
+        if (history.length && history[0].role === 'user') {
+            history = history.slice(1);
+        }
+
+        res.json({
+            conversationId,
+            messages: history
+        });
+    } catch (err) {
+        next(err);
+    }
+}
 
 module.exports = {
     getDashboard,
@@ -1070,4 +1411,7 @@ module.exports = {
     getScanStats,
     photoUpload,
     LLMAskQuestion,
+    guardianLLMAskQuestion,
+    getConversationImage,
+    getConversationHistory,
 };

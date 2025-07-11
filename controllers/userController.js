@@ -861,7 +861,7 @@ async function LLMAskQuestion(req, res, next) {
     try {
         const userId = req.user.user_id;
         // 6900XT Personal PC
-        const apiUrl = 'https://curious-mutually-platypus.ngrok-free.app/api/chat';
+        const apiUrl = 'https://llm.ingen.com.ph/api/chat';
         let { conversationId, content, base64, isStream } = req.body;
 
         if (typeof content !== 'string' || !content.trim()) {
@@ -1060,7 +1060,7 @@ async function LLMAskQuestion(req, res, next) {
 async function guardianLLMAskQuestion(req, res, next) {
     try {
         // 6900XT Personal PC
-        const apiUrl = 'https://curious-mutually-platypus.ngrok-free.app/api/chat';
+        const apiUrl = 'https://llm.ingen.com.ph/api/chat';
         const { user_id: guardianId, accountType } = req.user;
 
         // extract and validate target user

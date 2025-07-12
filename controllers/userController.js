@@ -611,13 +611,6 @@ async function getScansByUser(req, res, next) {
         const { user_id: requesterId, accountType, isPremiumUser } = req.user;
         const targetId = parseInt(req.query.user_id, 10);
 
-        // only premium users may access this endpoint
-        if (isPremiumUser !== 1) {
-            return res
-                .status(403)
-                .json({ error: "Premium subscription required." });
-        }
-
         if (isNaN(targetId)) {
             return res.status(400).json({ error: 'Invalid user_id.' });
         }
@@ -636,6 +629,15 @@ async function getScansByUser(req, res, next) {
             if (!link.length) {
                 return res.status(403).json({ error: 'Not bound.' });
             }
+        }
+
+        const [targetRows] = await pool.execute(
+            `SELECT isPremiumUser FROM USERS WHERE user_id = ?`,
+            [targetId]
+        );
+
+        if (!targetRows.length || targetRows[0].isPremiumUser !== 1) {
+            return res.status(403).json({ error: 'Premium subscription required.' });
         }
 
         // 1) fetch object & OCR scans

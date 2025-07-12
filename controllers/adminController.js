@@ -326,13 +326,18 @@ module.exports = {
             // a) USER_GUARDIAN_LINK
             await conn.execute(
                 `DELETE FROM USER_GUARDIAN_LINK
-         WHERE user_id = ? OR guardian_id = ?`,
+                 WHERE user_id = ? OR guardian_id = ?`,
                 [userId, userId]
             );
 
             // b) OTPS
             await conn.execute(
                 `DELETE FROM OTPS WHERE user_id = ?`,
+                [userId]
+            );
+
+            await conn.execute(
+                `DELETE FROM VOICE_MESSAGES WHERE user_id = ?`,
                 [userId]
             );
 
@@ -360,13 +365,7 @@ module.exports = {
                 [userId]
             );
 
-            // g) VOICE_MESSAGES
-            await conn.execute(
-                `DELETE FROM VOICE_MESSAGES WHERE user_id = ?`,
-                [userId]
-            );
 
-            // h) Finally USERS
             const [delResult] = await conn.execute(
                 `DELETE FROM USERS WHERE user_id = ?`,
                 [userId]

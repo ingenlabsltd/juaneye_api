@@ -105,7 +105,7 @@ module.exports = {
         try {
             // 1) Fetch user row
             const [rows] = await pool.execute(
-                "SELECT user_id, password, accountType FROM USERS WHERE email = ?",
+                "SELECT user_id, password, accountType, isPremiumUser FROM USERS WHERE email = ?",
                 [email]
             );
             if (rows.length === 0) {
@@ -124,7 +124,8 @@ module.exports = {
                 {
                     user_id:     user.user_id,
                     email:       user.email,
-                    accountType: user.accountType
+                    accountType: user.accountType,
+                    isPremiumUser: user.isPremiumUser
                 },
                 process.env.JWT_SECRET,
                 { expiresIn: "2h" }

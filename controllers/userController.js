@@ -657,25 +657,40 @@ async function getScansByUser(req, res, next) {
         // 2) fetch LLM conversation summaries (first user message), *only* for this user
         const [convoRows] = await pool.execute(
             `SELECT
-                 cm.id,
-                 cm.conversation_id,
-                 cm.content         AS first_user_message,
-                 'LLM'              AS type,
-                 cm.createdAt
-             FROM (
-                      SELECT
-                          conversation_id,
-                          MIN(createdAt) AS firstAt
-                      FROM CONVERSATION_MESSAGES
-                      WHERE role = 'user'
-                        AND user_id = ?
-                      GROUP BY conversation_id
-                  ) AS t
-                      JOIN CONVERSATION_MESSAGES AS cm
-                           ON cm.conversation_id = t.conversation_id
-                               AND cm.createdAt      = t.firstAt
-                               AND cm.role           = 'user'
-             ORDER BY cm.createdAt DESC`,
+         ucm.id,
+         ucm.conversation_id,
+         ucm.content AS first_user_message,
+         CASE
+             WHEN acm.content IS NOT NULL
+             THEN TRIM(SUBSTRING_INDEX(acm.content, '\n\n', -3))
+             ELSE NULL
+         END AS first_assistant_message,
+         'LLM'       AS type,
+         ucm.createdAt
+     FROM (
+              SELECT
+                  conversation_id,
+                  MIN(createdAt) AS firstAt
+              FROM CONVERSATION_MESSAGES
+              WHERE role = 'user'
+                AND user_id = ?
+              GROUP BY conversation_id
+          ) AS t
+     JOIN CONVERSATION_MESSAGES AS ucm
+          ON ucm.conversation_id = t.conversation_id
+             AND ucm.createdAt = t.firstAt
+             AND ucm.role = 'user'
+     LEFT JOIN CONVERSATION_MESSAGES AS acm
+          ON acm.conversation_id = ucm.conversation_id
+             AND acm.role = 'assistant'
+             AND acm.createdAt = (
+                 SELECT MIN(createdAt)
+                 FROM CONVERSATION_MESSAGES
+                 WHERE role = 'assistant'
+                   AND conversation_id = ucm.conversation_id
+                   AND createdAt > ucm.createdAt
+             )
+     ORDER BY ucm.createdAt DESC`,
             [targetId]
         );
 

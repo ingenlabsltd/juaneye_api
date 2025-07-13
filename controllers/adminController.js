@@ -566,7 +566,7 @@ module.exports = {
     },
 
     /**
-     * GET /api/users/scans/:conversationId/images
+     * GET /api/admin/scans/:conversationId/images
      * Returns the first base64-encoded image for that conversation.
      */
     getConversationImages: async (req, res, next) => {

@@ -4,6 +4,7 @@ const express = require('express');
 const router = express.Router();
 const { verifyToken } = require('../middleware/authMiddleware');
 const adminController = require('../controllers/adminController');
+const userController = require("../controllers/userController");
 
 // Protect everything below with JWT + Admin‐only check
 router.use(verifyToken, (req, res, next) => {
@@ -24,6 +25,8 @@ router.put('/admin/users/:userId', adminController.updateUser);
 router.delete('/admin/users/:userId', adminController.deleteUser);
 
 router.get('/admin/users/:userId/scans', adminController.getUserScans);
+
+router.get('/admin/scans/:conversationId/images', adminController.getConversationImages);
 
 router.put('/admin/scans/:scanId', adminController.updateScan);
 

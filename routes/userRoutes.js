@@ -29,7 +29,6 @@ router.get('/user/get-guardians', userController.getUserGuardians);
 
 router.delete('/user/remove-guardian/:guardianId', userController.removeUserGuardian);
 
-router.get('/users/scans/:conversationId/images', userController.getConversationImages);
 // ─── Guardian binding routes ──────────────────────────────────────────────
 
 router.post('/user/guardian/bind-request', userController.requestGuardianBind);

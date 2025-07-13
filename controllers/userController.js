@@ -307,6 +307,60 @@ async function getSingleScan(req, res, next) {
 }
 
 /**
+ * GET /api/user/get-guardians
+ * Returns all Guardians bound to this user, including their emails.
+ */
+async function getUserGuardians(req, res, next) {
+    try {
+        const userId = req.user.user_id;
+
+        const [rows] = await pool.execute(
+            `SELECT
+                 u.user_id   AS guardianId,
+                 u.email     AS guardianEmail
+             FROM USER_GUARDIAN_LINK l
+             JOIN USERS u
+               ON u.user_id = l.guardian_id
+             WHERE l.user_id = ?`,
+            [userId]
+        );
+
+        res.json(rows);
+    } catch (err) {
+        next(err);
+    }
+}
+
+/**
+ * DELETE /api/user/remove-guardian/:guardianId
+ * Removes a bound Guardian from this user.
+ */
+async function removeUserGuardian(req, res, next) {
+    try {
+        const userId = req.user.user_id;
+        const guardianId = parseInt(req.params.guardianId, 10);
+
+        if (isNaN(guardianId)) {
+            return res.status(400).json({ error: 'Invalid guardianId parameter.' });
+        }
+
+        const [result] = await pool.execute(
+            `DELETE FROM USER_GUARDIAN_LINK
+             WHERE user_id = ? AND guardian_id = ?`,
+            [userId, guardianId]
+        );
+
+        if (!result.affectedRows) {
+            return res.status(404).json({ error: 'No such Guardian binding found.' });
+        }
+
+        res.json({ message: 'Guardian removed successfully.' });
+    } catch (err) {
+        next(err);
+    }
+}
+
+/**
  * PUT /api/user/scans/:scanId
  * Body: { type, name, text }
  * Updates a scan if authorized (owner or bound Guardian).
@@ -1438,4 +1492,6 @@ module.exports = {
     guardianLLMAskQuestion,
     getConversationImage,
     getConversationHistory,
+    getUserGuardians,
+    removeUserGuardian
 };

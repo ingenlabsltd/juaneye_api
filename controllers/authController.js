@@ -33,8 +33,6 @@ async function sendOTPEmail(toEmail, codeValue) {
     });
 }
 
-// ─── Helper for strong-password validation ──────────────────────────────────
-
 /**
  * Returns true if password is at least 8 chars,
  * contains uppercase, lowercase, digit, and special char.
@@ -42,6 +40,14 @@ async function sendOTPEmail(toEmail, codeValue) {
 function isStrongPassword(password) {
     const strongPwdRegex = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[\W_]).{8,}$/;
     return strongPwdRegex.test(password);
+}
+
+/**
+ * Returns true if email is in valid format.
+ */
+function isValidEmail(email) {
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    return emailRegex.test(email);
 }
 
 // ─── Controller exports ─────────────────────────────────────────────────────
@@ -60,6 +66,13 @@ module.exports = {
             return res
                 .status(400)
                 .json({ error: "Email and password are required." });
+        }
+
+        // Validate email format
+        if (!isValidEmail(email)) {
+            return res
+                .status(400)
+                .json({ error: "Invalid email format." });
         }
 
         // Validate password strength
@@ -122,6 +135,13 @@ module.exports = {
                 .json({ error: "Email and password are required." });
         }
 
+        // Validate email format
+        if (!isValidEmail(email)) {
+            return res
+                .status(400)
+                .json({ error: "Invalid email format." });
+        }
+
         try {
             // 1) Fetch user row
             const [rows] = await pool.execute(
@@ -168,6 +188,14 @@ module.exports = {
         if (!email) {
             return res.status(400).json({ error: "Email is required." });
         }
+
+        // Validate email format
+        if (!isValidEmail(email)) {
+            return res
+                .status(400)
+                .json({ error: "Invalid email format." });
+        }
+
         try {
             // 1) Lookup user
             const [users] = await pool.execute(
@@ -213,6 +241,13 @@ module.exports = {
             return res
                 .status(400)
                 .json({ error: "Email, codeValue, and newPassword are required." });
+        }
+
+        // Validate email format
+        if (!isValidEmail(email)) {
+            return res
+                .status(400)
+                .json({ error: "Invalid email format." });
         }
 
         // Validate new password strength

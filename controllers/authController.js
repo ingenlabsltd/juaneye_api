@@ -33,7 +33,7 @@ async function sendOTPEmail(toEmail, codeValue) {
     });
 }
 
-// ─── Helper for strong‐password validation ─────────────────────────────────
+// ─── Helper for strong-password validation ──────────────────────────────────
 
 /**
  * Returns true if password is at least 8 chars,
@@ -213,6 +213,15 @@ module.exports = {
             return res
                 .status(400)
                 .json({ error: "Email, codeValue, and newPassword are required." });
+        }
+
+        // Validate new password strength
+        if (!isStrongPassword(newPassword)) {
+            return res
+                .status(400)
+                .json({
+                    error: "New password must be at least 8 characters long and include uppercase, lowercase, number, and special character."
+                });
         }
 
         try {

@@ -459,7 +459,7 @@ module.exports = {
             `;
             const [convoRows] = await pool.execute(convoSql, [userId]);
 
-            // 3) merge & sort everything by createdAt DESC
+            // 3) merge & sort everything by createdAt DESC including LLM
             const combined = [...scanRows, ...convoRows].sort(
                 (a, b) => new Date(b.createdAt) - new Date(a.createdAt)
             );

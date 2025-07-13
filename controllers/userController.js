@@ -549,58 +549,64 @@ module.exports = {
             }
         },
 
-        /**
-         * POST /api/user/guardian/bind-request
-         */
-        requestGuardianBind: async (req, res, next) => {
-            try {
-                const {user_id, accountType} = req.user;
+    /**
+     * POST /api/user/guardian/bind-request
+     */
+    requestGuardianBind: async (req, res, next) => {
+        try {
+            const { user_id, accountType } = req.user;
 
-                if (accountType !== 'Guardian') {
-                    return res.status(403).json({error: 'Only Guardians can request binding.'});
-                }
-
-                const {email} = req.body;
-
-                if (typeof email !== 'string') {
-                    return res.status(400).json({error: 'Email required.'});
-                }
-
-                const [users] = await pool.execute(
-                    `SELECT user_id
-                     FROM USERS
-                     WHERE email = ?`,
-                    [email]
-                );
-
-                if (!users.length) {
-                    return res.status(404).json({error: 'User not found.'});
-                }
-
-                const targetId = users[0].user_id;
-                const codeValue = generateOTP();
-                const expiration = new Date(
-                    Date.now() + parseInt(process.env.OTP_EXPIRATION_MINUTES, 10) * 60000
-                );
-
-                await pool.execute(
-                    `INSERT INTO OTPS (user_id,
-                                       codeValue,
-                                       expirationTime,
-                                       isUsed,
-                                       createdAt,
-                                       updatedAt)
-                     VALUES (?, ?, ?, FALSE, NOW(), NOW())`,
-                    [targetId, codeValue, expiration]
-                );
-
-                await sendOTPEmail(email, codeValue);
-
-                res.json({message: 'OTP sent.'});
-            } catch (err) {
-                next(err);
+            if (accountType !== 'Guardian') {
+                return res.status(403).json({ error: 'Only Guardians can request binding.' });
             }
-        },
+
+            const { email } = req.body;
+
+            if (typeof email !== 'string') {
+                return res.status(400).json({ error: 'Email required.' });
+            }
+
+            // fetch target user and its accountType
+            const [users] = await pool.execute(
+                `SELECT user_id, accountType
+                 FROM USERS
+                 WHERE email = ?`,
+                [email]
+            );
+
+            if (!users.length) {
+                return res.status(404).json({ error: 'User not found.' });
+            }
+
+            const target = users[0];
+            // prevent binding to another Guardian
+            if (target.accountType === 'Guardian') {
+                return res.status(400).json({ error: 'Cannot bind to a Guardian account.' });
+            }
+
+            const codeValue = generateOTP();
+            const expiration = new Date(
+                Date.now() + parseInt(process.env.OTP_EXPIRATION_MINUTES, 10) * 60000
+            );
+
+            await pool.execute(
+                `INSERT INTO OTPS (user_id,
+                                   codeValue,
+                                   expirationTime,
+                                   isUsed,
+                                   createdAt,
+                                   updatedAt)
+                 VALUES (?, ?, ?, FALSE, NOW(), NOW())`,
+                [target.user_id, codeValue, expiration]
+            );
+
+            await sendOTPEmail(email, codeValue);
+
+            res.json({ message: 'OTP sent.' });
+        } catch (err) {
+            next(err);
+        }
+    },
 
         /**
          * POST /api/user/guardian/bind-confirm

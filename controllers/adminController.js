@@ -422,20 +422,20 @@ module.exports = {
 
             // 2) fetch LLM conversation summaries (first user message, first assistant reply, first image)
             const convoSql = `
-          SELECT
-            ucm.conversation_id             AS conversationId,
-            'LLM'                           AS type,
-            ucm.createdAt                   AS createdAt,
-            ucm.content                     AS first_user_message,
-            (
-              SELECT cm.content
-              FROM CONVERSATION_MESSAGES cm
-              WHERE cm.conversation_id = ucm.conversation_id
-                AND cm.role = 'assistant'
-                AND cm.createdAt > ucm.createdAt
-              ORDER BY cm.createdAt ASC
-              LIMIT 1
-            )                               AS first_assistant_message,
+                SELECT
+                    ucm.conversation_id             AS conversationId,
+                    'LLM'                           AS type,
+                    ucm.createdAt                   AS createdAt,
+                    ucm.content                     AS first_user_message,
+                    (
+                        SELECT cm.content
+                        FROM CONVERSATION_MESSAGES cm
+                        WHERE cm.conversation_id = ucm.conversation_id
+                          AND cm.role = 'assistant'
+                          AND cm.createdAt > ucm.createdAt
+                        ORDER BY cm.createdAt ASC
+                                                       LIMIT 1
+                    )                               AS first_assistant_message,
             (
               SELECT cm2.images
               FROM CONVERSATION_MESSAGES cm2
@@ -444,20 +444,20 @@ module.exports = {
               ORDER BY cm2.createdAt ASC
               LIMIT 1
             )                               AS images
-          FROM (
-            SELECT conversation_id, MIN(createdAt) AS firstAt
-            FROM CONVERSATION_MESSAGES
-            WHERE user_id = ?
-              AND role = 'user'
-            GROUP BY conversation_id
-          ) t
-          JOIN CONVERSATION_MESSAGES ucm
-            ON ucm.conversation_id = t.conversation_id
-           AND ucm.createdAt       = t.firstAt
-           AND ucm.role            = 'user'
-          ORDER BY ucm.createdAt DESC
-        `;
-            const [convoRows] = await pool.execute(convoSql, [userId, userId]);
+                FROM (
+                    SELECT conversation_id, MIN(createdAt) AS firstAt
+                    FROM CONVERSATION_MESSAGES
+                    WHERE user_id = ?
+                    AND role = 'user'
+                    GROUP BY conversation_id
+                    ) t
+                    JOIN CONVERSATION_MESSAGES ucm
+                ON ucm.conversation_id = t.conversation_id
+                    AND ucm.createdAt       = t.firstAt
+                    AND ucm.role            = 'user'
+                ORDER BY ucm.createdAt DESC
+            `;
+            const [convoRows] = await pool.execute(convoSql, [userId]);
 
             // 3) merge & sort everything by createdAt DESC
             const combined = [...scanRows, ...convoRows].sort(

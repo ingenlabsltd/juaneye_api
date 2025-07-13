@@ -835,66 +835,83 @@ module.exports = {
             }
         },
 
-        /**
-         * GET /api/user/guardian/scan-stats
-         * Query params (optional): startDate=YYYY-MM-DD, endDate=YYYY-MM-DD
-         * Returns aggregated counts for bound users over the given date range.
-         * Defaults to today 00:00:00 → now.
-         */
-        getScanStats: async (req, res, next) => {
-            try {
-                const {user_id: guardianId, accountType} = req.user;
-                if (accountType !== 'Guardian') {
-                    return res.status(403).json({error: 'Only Guardians can view stats.'});
-                }
-
-                // parse dates or default to today
-                const today = new Date();
-                const start = req.query.startDate
-                    ? new Date(String(req.query.startDate))
-                    : new Date(today.getFullYear(), today.getMonth(), today.getDate());
-                const end = req.query.endDate
-                    ? new Date(String(req.query.endDate))
-                    : today;
-
-                // get the list of bound user IDs
-                const [links] = await pool.execute(
-                    `SELECT user_id
-                     FROM USER_GUARDIAN_LINK
-                     WHERE guardian_id = ?`,
-                    [guardianId]
-                );
-                const userIds = links.map(r => r.user_id);
-                if (userIds.length === 0) {
-                    return res.json({objectScanCount: 0, ocrScanCount: 0});
-                }
-
-                const placeholders = userIds.map(() => '?').join(',');
-                // count object scans
-                const [objRows] = await pool.execute(
-                    `SELECT COUNT(*) AS objectScanCount
-                     FROM OBJECT_SCANS
-                     WHERE user_id IN (${placeholders})
-                       AND createdAt BETWEEN ? AND ?`,
-                    [...userIds, start, end]
-                );
-                // count OCR scans
-                const [ocrRows] = await pool.execute(
-                    `SELECT COUNT(*) AS ocrScanCount
-                     FROM OCR_SCANS
-                     WHERE user_id IN (${placeholders})
-                       AND dateTime BETWEEN ? AND ?`,
-                    [...userIds, start, end]
-                );
-
-                res.json({
-                    objectScanCount: objRows[0].objectScanCount,
-                    ocrScanCount: ocrRows[0].ocrScanCount,
-                });
-            } catch (err) {
-                next(err);
+    /**
+     * GET /api/user/guardian/scan-stats
+     * Query params (optional):
+     *   - user_id=<number>    // single bound-user to get stats for
+     *   - startDate=YYYY-MM-DD
+     *   - endDate=YYYY-MM-DD
+     * Returns:
+     *   - objectScanCount
+     *   - ocrScanCount
+     *   - llmCount       (unique conversation threads)
+     */
+    getScanStats: async (req, res, next) => {
+        try {
+            const { user_id: guardianId, accountType } = req.user;
+            if (accountType !== 'Guardian') {
+                return res.status(403).json({ error: 'Only Guardians can view stats.' });
             }
-        },
+
+            // parse and verify single targetId
+            const targetId = parseInt(String(req.query.user_id), 10);
+            if (isNaN(targetId)) {
+                return res.status(400).json({ error: 'Invalid or missing user_id parameter.' });
+            }
+            // ensure binding
+            const [link] = await pool.execute(
+                `SELECT 1
+             FROM USER_GUARDIAN_LINK
+             WHERE guardian_id = ?
+               AND user_id = ?`,
+                [guardianId, targetId]
+            );
+            if (!link.length) {
+                return res.status(403).json({ error: 'Not bound to this user.' });
+            }
+
+            // parse date range or default to today→now
+            const today = new Date();
+            const start = req.query.startDate
+                ? new Date(String(req.query.startDate))
+                : new Date(today.getFullYear(), today.getMonth(), today.getDate());
+            const end = req.query.endDate
+                ? new Date(String(req.query.endDate))
+                : today;
+
+            // 1) Object scans
+            const [[{ objectScanCount }]] = await pool.execute(
+                `SELECT COUNT(*) AS objectScanCount
+             FROM OBJECT_SCANS
+             WHERE user_id = ?
+               AND createdAt BETWEEN ? AND ?`,
+                [targetId, start, end]
+            );
+
+            // 2) OCR scans
+            const [[{ ocrScanCount }]] = await pool.execute(
+                `SELECT COUNT(*) AS ocrScanCount
+                 FROM OCR_SCANS
+                 WHERE user_id = ?
+                   AND dateTime BETWEEN ? AND ?`,
+                [targetId, start, end]
+            );
+
+            // 3) LLM conversations (distinct conversation_id)
+            const [[{ llmCount }]] = await pool.execute(
+                `SELECT COUNT(DISTINCT conversation_id) AS llmCount
+                 FROM CONVERSATION_MESSAGES
+                 WHERE user_id = ?
+                   AND role = 'user'
+                   AND createdAt BETWEEN ? AND ?`,
+                [targetId, start, end]
+            );
+
+            res.json({ objectScanCount, ocrScanCount, llmCount });
+        } catch (err) {
+            next(err);
+        }
+    },
 
         /**
          * POST /api/user/photo-upload

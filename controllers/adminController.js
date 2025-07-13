@@ -518,11 +518,28 @@ module.exports = {
 
     /**
      * DELETE /api/admin/scans/:scanId
-     * Tries to delete from OCR_SCANS first, then OBJECT_SCANS.
+     * Tries to delete from OCR_SCANS first, then OBJECT_SCANS,
+     * or if :scanId is a conversationId UUID, deletes all messages in that conversation.
      */
     deleteScan: async (req, res, next) => {
         try {
-            const scanId = parseInt(req.params.scanId);
+            const scanIdParam = req.params.scanId;
+
+            const isUuid = /^[0-9a-fA-F]{8}\-[0-9a-fA-F]{4}\-[0-9a-fA-F]{4}\-[0-9a-fA-F]{4}\-[0-9a-fA-F]{12}$/.test(scanIdParam);
+            if (isUuid) {
+                const [msgDel] = await pool.execute(
+                    `DELETE FROM CONVERSATION_MESSAGES WHERE conversation_id = ?`,
+                    [scanIdParam]
+                );
+                if (msgDel.affectedRows > 0) {
+                    return res.json({ message: 'LLM conversation deleted successfully.' });
+                } else {
+                    return res.status(404).json({ error: 'Conversation not found.' });
+                }
+            }
+
+            // otherwise treat as numeric scanId
+            const scanId = parseInt(scanIdParam, 10);
             if (isNaN(scanId)) {
                 return res.status(400).json({ error: 'Invalid scanId parameter' });
             }

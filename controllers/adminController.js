@@ -397,29 +397,72 @@ module.exports = {
                 return res.status(400).json({ error: 'Invalid userId parameter' });
             }
 
-            const [rows] = await pool.execute(
+            // 1) fetch object & OCR scans
+            const [scanRows] = await pool.execute(
                 `SELECT
-           scan_id           AS scanId,
-           recognizedObjects AS name,
-           text              AS text,
-           'Object'          AS type,
-           createdAt
-         FROM OBJECT_SCANS
-         WHERE user_id = ?
-         UNION ALL
-         SELECT
-           ocr_id            AS scanId,
-           recognizedText    AS name,
-           text              AS text,
-           'Text'            AS type,
-           createdAt
-         FROM OCR_SCANS
-         WHERE user_id = ?
-         ORDER BY createdAt DESC`,
+                     scan_id           AS scanId,
+                     recognizedObjects AS name,
+                     text              AS text,
+                     'Object'          AS type,
+                     createdAt
+                 FROM OBJECT_SCANS
+                 WHERE user_id = ?
+                 UNION ALL
+                 SELECT
+                     ocr_id            AS scanId,
+                     recognizedText    AS name,
+                     text              AS text,
+                     'Text'            AS type,
+                     createdAt
+                 FROM OCR_SCANS
+                 WHERE user_id = ?
+                 ORDER BY createdAt DESC`,
                 [userId, userId]
             );
 
-            return res.json(rows);
+            // 2) fetch LLM conversation summaries (first user message, first assistant reply, first image)
+            const [convoRows] = await pool.execute(
+                `SELECT
+                 ucm.conversation_id           AS conversationId,
+                 'LLM'                         AS type,
+                 ucm.createdAt                 AS createdAt,
+                 ucm.content                   AS first_user_message,
+                 (
+                   SELECT content
+                   FROM CONVERSATION_MESSAGES
+                   WHERE conversation_id = ucm.conversation_id
+                     AND role = 'assistant'
+                     AND createdAt > ucm.createdAt
+                   ORDER BY createdAt ASC
+                   LIMIT 1
+                 )                              AS first_assistant_message,
+                 (
+                   SELECT images
+                   FROM CONVERSATION_MESSAGES
+                   WHERE conversation_id = ucm.conversation_id
+                     AND images IS NOT NULL
+                   ORDER BY createdAt ASC
+                   LIMIT 1
+                 )                              AS images
+             FROM CONVERSATION_MESSAGES AS ucm
+             WHERE ucm.user_id = ?
+               AND ucm.role = 'user'
+               AND ucm.createdAt = (
+                   SELECT MIN(createdAt)
+                   FROM CONVERSATION_MESSAGES
+                   WHERE conversation_id = ucm.conversation_id
+                     AND role = 'user'
+                     AND user_id = ?
+               )`,
+                [userId, userId]
+            );
+
+            // 3) merge & sort everything by createdAt DESC
+            const combined = [...scanRows, ...convoRows].sort(
+                (a, b) => new Date(b.createdAt) - new Date(a.createdAt)
+            );
+
+            return res.json(combined);
         } catch (err) {
             return next(err);
         }

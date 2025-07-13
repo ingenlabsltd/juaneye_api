@@ -309,6 +309,109 @@ module.exports = {
     },
 
     /**
+     * GET /api/admin/users/:userId/guardians
+     * Returns all guardians currently bound to the specified user.
+     */
+    getUserGuardians: async (req, res, next) => {
+        try {
+            const userId = parseInt(req.params.userId, 10);
+            if (isNaN(userId)) {
+                return res.status(400).json({ error: 'Invalid userId parameter' });
+            }
+            // Fetch guardian bindings
+            const [rows] = await pool.execute(
+                `SELECT 
+                    u.user_id      AS guardian_id,
+                    u.email        AS guardian_email
+                 FROM USER_GUARDIAN_LINK ugl
+                 JOIN USERS u
+                   ON u.user_id = ugl.guardian_id
+                 WHERE ugl.user_id = ?`,
+                [userId]
+            );
+            return res.json({ guardians: rows });
+        } catch (err) {
+            return next(err);
+        }
+    },
+
+    /**
+     * POST /api/admin/users/:userId/guardians
+     * Body: { guardianId: number }
+     * Binds a guardian account to the specified user account.
+     */
+    bindGuardian: async (req, res, next) => {
+        try {
+            const userId = parseInt(req.params.userId, 10);
+            const guardianId = parseInt(req.body.guardianId, 10);
+
+            if (isNaN(userId) || isNaN(guardianId)) {
+                return res.status(400).json({ error: 'userId and guardianId must be numbers.' });
+            }
+            if (userId === guardianId) {
+                return res.status(400).json({ error: 'Cannot bind a user as their own guardian.' });
+            }
+
+            // Verify user is of type 'User'
+            const [userRows] = await pool.execute(
+                `SELECT accountType FROM USERS WHERE user_id = ?`,
+                [userId]
+            );
+            if (!userRows.length || userRows[0].accountType !== 'User') {
+                return res.status(400).json({ error: 'Target user must have accountType "User".' });
+            }
+
+            // Verify guardian is of type 'Guardian'
+            const [guardRows] = await pool.execute(
+                `SELECT accountType FROM USERS WHERE user_id = ?`,
+                [guardianId]
+            );
+            if (!guardRows.length || guardRows[0].accountType !== 'Guardian') {
+                return res.status(400).json({ error: 'guardianId must refer to a user with accountType "Guardian".' });
+            }
+
+            // Insert binding (ignore duplicates)
+            await pool.execute(
+                `INSERT IGNORE INTO USER_GUARDIAN_LINK (user_id, guardian_id)
+                 VALUES (?, ?)`,
+                [userId, guardianId]
+            );
+
+            return res.status(201).json({ message: 'Guardian bound to user successfully.' });
+        } catch (err) {
+            return next(err);
+        }
+    },
+
+    /**
+     * DELETE /api/admin/users/:userId/guardians/:guardianId
+     * Unbinds (removes) a guardian from the specified user.
+     */
+    unbindGuardian: async (req, res, next) => {
+        try {
+            const userId = parseInt(req.params.userId, 10);
+            const guardianId = parseInt(req.params.guardianId, 10);
+
+            if (isNaN(userId) || isNaN(guardianId)) {
+                return res.status(400).json({ error: 'userId and guardianId must be numbers.' });
+            }
+
+            const [result] = await pool.execute(
+                `DELETE FROM USER_GUARDIAN_LINK
+                 WHERE user_id = ? AND guardian_id = ?`,
+                [userId, guardianId]
+            );
+            if (result.affectedRows === 0) {
+                return res.status(404).json({ error: 'No such guardian binding found.' });
+            }
+
+            return res.json({ message: 'Guardian unbound from user successfully.' });
+        } catch (err) {
+            return next(err);
+        }
+    },
+
+    /**
      * DELETE /api/admin/users/:userId
      * Deletes a user and all related data.
      */

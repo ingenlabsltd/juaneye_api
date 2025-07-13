@@ -33,6 +33,17 @@ async function sendOTPEmail(toEmail, codeValue) {
     });
 }
 
+// ─── Helper for strong‐password validation ─────────────────────────────────
+
+/**
+ * Returns true if password is at least 8 chars,
+ * contains uppercase, lowercase, digit, and special char.
+ */
+function isStrongPassword(password) {
+    const strongPwdRegex = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[\W_]).{8,}$/;
+    return strongPwdRegex.test(password);
+}
+
 // ─── Controller exports ─────────────────────────────────────────────────────
 
 module.exports = {
@@ -49,6 +60,15 @@ module.exports = {
             return res
                 .status(400)
                 .json({ error: "Email and password are required." });
+        }
+
+        // Validate password strength
+        if (!isStrongPassword(password)) {
+            return res
+                .status(400)
+                .json({
+                    error: "Password must be at least 8 characters long and include uppercase, lowercase, number, and special character."
+                });
         }
 
         try {
@@ -122,9 +142,9 @@ module.exports = {
             // 3) Sign JWT
             const token = jwt.sign(
                 {
-                    user_id:     user.user_id,
-                    email:       user.email,
-                    accountType: user.accountType,
+                    user_id:       user.user_id,
+                    email:         user.email,
+                    accountType:   user.accountType,
                     isPremiumUser: user.isPremiumUser
                 },
                 process.env.JWT_SECRET,

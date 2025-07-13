@@ -873,10 +873,18 @@ module.exports = {
             // parse date range or default to today→now
             const today = new Date();
             const start = req.query.startDate
-                ? new Date(String(req.query.startDate))
-                : new Date(today.getFullYear(), today.getMonth(), today.getDate());
+                ? (() => {
+                    const d = new Date(String(req.query.startDate));
+                    return new Date(d.getFullYear(), d.getMonth(), d.getDate(), 0, 0, 0, 0);
+                })()
+                : new Date(today.getFullYear(), today.getMonth(), today.getDate(), 0, 0, 0, 0);
+
+            // if endDate provided, push end to 23:59:59.999 of that day; else use now
             const end = req.query.endDate
-                ? new Date(String(req.query.endDate))
+                ? (() => {
+                    const d = new Date(String(req.query.endDate));
+                    return new Date(d.getFullYear(), d.getMonth(), d.getDate(), 23, 59, 59, 999);
+                })()
                 : today;
 
             // 1) Object scans

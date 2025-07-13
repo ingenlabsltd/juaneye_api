@@ -523,7 +523,7 @@ module.exports = {
                 [userId, userId]
             );
 
-            // 2) fetch LLM conversation summaries (first user message, first assistant reply, first image)
+            // 2) fetch LLM conversation summaries (first user message, first assistant reply)
             const convoSql = `
                 SELECT
                     ucm.conversation_id             AS conversationId,
@@ -538,15 +538,7 @@ module.exports = {
                           AND cm.createdAt > ucm.createdAt
                         ORDER BY cm.createdAt ASC
                                                        LIMIT 1
-                    )                               AS first_assistant_message,
-            (
-              SELECT cm2.images
-              FROM CONVERSATION_MESSAGES cm2
-              WHERE cm2.conversation_id = ucm.conversation_id
-                AND cm2.images IS NOT NULL
-              ORDER BY cm2.createdAt ASC
-              LIMIT 1
-            )                               AS images
+                    )                               AS first_assistant_message
                 FROM (
                     SELECT conversation_id, MIN(createdAt) AS firstAt
                     FROM CONVERSATION_MESSAGES
@@ -568,6 +560,38 @@ module.exports = {
             );
 
             return res.json(combined);
+        } catch (err) {
+            return next(err);
+        }
+    },
+
+    /**
+     * GET /api/users/scans/:conversationId/images
+     * Returns the first base64-encoded image for that conversation.
+     */
+    getConversationImages: async (req, res, next) => {
+        try {
+            const conversationId = req.params.conversationId;
+            if (!conversationId) {
+                return res.status(400).json({ error: 'Invalid conversationId parameter' });
+            }
+
+            const [rows] = await pool.execute(
+                `SELECT
+                 images AS images
+             FROM CONVERSATION_MESSAGES
+             WHERE conversation_id = ?
+               AND images IS NOT NULL
+             ORDER BY createdAt ASC
+             LIMIT 1`,
+                [conversationId]
+            );
+
+            if (!rows.length) {
+                return res.status(404).json({ error: 'No images found for this conversation.' });
+            }
+
+            return res.json({ images: rows[0].images });
         } catch (err) {
             return next(err);
         }

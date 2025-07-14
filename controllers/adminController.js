@@ -718,5 +718,45 @@ module.exports = {
         } catch (err) {
             return next(err);
         }
-    }
+    },
+
+    /**
+     * GET /api/admin/conversations/:conversationId/history
+     * Returns all conversation messages for the given conversationId,
+     * excluding messages that include images.
+     */
+    getConversationHistory: async (req, res, next) => {
+        try {
+            const conversationId = req.params.conversationId;
+            if (typeof conversationId !== 'string' || !conversationId.trim()) {
+                return res.status(400).json({ error: 'Invalid conversationId parameter.' });
+            }
+
+            const [[exists]] = await pool.execute(
+                `SELECT conversation_id
+                   FROM CONVERSATION_MESSAGES
+                  WHERE conversation_id = ?
+                  LIMIT 1`,
+                [conversationId]
+            );
+            if (!exists) {
+                return res.status(404).json({ error: 'Conversation not found.' });
+            }
+
+            const [rows] = await pool.execute(
+                `SELECT role,
+                        content,
+                        createdAt
+                   FROM CONVERSATION_MESSAGES
+                  WHERE conversation_id = ?
+                    AND images IS NULL
+                  ORDER BY createdAt ASC`,
+                [conversationId]
+            );
+
+            return res.json({ conversationId, messages: rows });
+        } catch (err) {
+            return next(err);
+        }
+    },
 };

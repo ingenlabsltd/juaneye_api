@@ -28,6 +28,8 @@ router.get('/admin/users/:userId/scans', adminController.getUserScans);
 
 router.get('/admin/scans/:conversationId/images', adminController.getConversationImages);
 
+router.get('/admin/conversations/:conversationId/history', adminController.getConversationHistory)
+
 router.put('/admin/scans/:scanId', adminController.updateScan);
 
 router.delete('/admin/scans/:scanId', adminController.deleteScan);

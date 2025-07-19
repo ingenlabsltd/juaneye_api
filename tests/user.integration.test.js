@@ -104,6 +104,30 @@ describe('User Integration Tests', function () {
         );
     });
 
+    // ─── Basic Profile Endpoints ──────────────────────────────────────────
+
+    it('GET /api/user/dashboard → should return dashboard info', async function () {
+        const res = await request(app)
+            .get('/api/user/dashboard')
+            .set('Authorization', `Bearer ${userToken}`)
+            .expect(200);
+
+        expect(res.body).to.have.property('message');
+        expect(res.body).to.have.nested.property('user.user_id', regularUserId);
+        expect(res.body).to.have.nested.property('user.email', REGULAR_EMAIL);
+    });
+
+    it('GET /api/user/profile → should return full profile', async function () {
+        const res = await request(app)
+            .get('/api/user/profile')
+            .set('Authorization', `Bearer ${userToken}`)
+            .expect(200);
+
+        expect(res.body).to.have.property('user_id', regularUserId);
+        expect(res.body).to.have.property('email', REGULAR_EMAIL);
+        expect(res.body).to.have.property('accountType', 'User');
+    });
+
     // ─── OCR CRUD ─────────────────────────────────────────────────────────────
 
     it('POST /api/user/ocr-scans → should create a new OCR scan', async function () {

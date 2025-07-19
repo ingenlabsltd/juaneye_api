@@ -377,6 +377,45 @@ describe('Admin Integration Tests', function () {
         expect(found.email).to.equal('updated.user@example.com');
     });
 
+    it('POST /api/users/:userId/guardians → should bind guardian user', async function () {
+        await request(app)
+            .post(`/api/users/${normalUserId}/guardians`)
+            .set('Authorization', 'Bearer ' + adminToken)
+            .send({ guardianId: createdUserId })
+            .expect(201);
+
+        const [rows] = await pool.execute(
+            `SELECT * FROM USER_GUARDIAN_LINK WHERE user_id = ? AND guardian_id = ?`,
+            [normalUserId, createdUserId]
+        );
+        expect(rows.length).to.equal(1);
+    });
+
+    it('GET /api/users/:userId/guardians → should list bound guardian', async function () {
+        const res = await request(app)
+            .get(`/api/users/${normalUserId}/guardians`)
+            .set('Authorization', 'Bearer ' + adminToken)
+            .expect(200);
+
+        expect(res.body).to.have.property('guardians').that.is.an('array');
+        const found = res.body.guardians.find(g => g.guardian_id === createdUserId);
+        expect(found).to.exist;
+        expect(found.guardian_email).to.equal('updated.user@example.com');
+    });
+
+    it('DELETE /api/users/:userId/guardians/:guardianId → should unbind guardian', async function () {
+        await request(app)
+            .delete(`/api/users/${normalUserId}/guardians/${createdUserId}`)
+            .set('Authorization', 'Bearer ' + adminToken)
+            .expect(200);
+
+        const [rows] = await pool.execute(
+            `SELECT * FROM USER_GUARDIAN_LINK WHERE user_id = ? AND guardian_id = ?`,
+            [normalUserId, createdUserId]
+        );
+        expect(rows.length).to.equal(0);
+    });
+
     it('DELETE /api/admin/users/:userId → should delete the created user', async function () {
         await request(app)
             .delete(`/api/admin/users/${createdUserId}`)

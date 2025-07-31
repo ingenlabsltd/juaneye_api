@@ -2,9 +2,12 @@ const pool = require('../db');
 
 // AUDIT MIDDLEWARE
 const auditLog = async (req, res, next) => {
+  if (!req.path.startsWith('/api/')) {
+    return next();
+  }
   const excludedRoutes = [
-    '/user/guardian/llm-ask-question',
-    '/user/llm-ask-question'
+    '/api/user/guardian/llm-ask-question',
+    '/api/user/llm-ask-question'
   ];
 
   if (excludedRoutes.includes(req.path)) {

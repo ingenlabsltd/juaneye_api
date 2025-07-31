@@ -28,8 +28,8 @@ async function sendOTPEmail(toEmail, codeValue) {
     await transporter.sendMail({
         from: process.env.EMAIL_USER,
         to:   toEmail,
-        subject: "Your Password Reset Code",
-        text:    `Your OTP code is: ${codeValue}. Expires in ${process.env.OTP_EXPIRATION_MINUTES} minutes.`
+        subject: "Your JuanEye Verification Code",
+        text:    `Your verification code is: ${codeValue}. It will expire in ${process.env.OTP_EXPIRATION_MINUTES} minutes.`
     });
 }
 
@@ -159,7 +159,76 @@ module.exports = {
                 return res.status(401).json({ error: "Invalid credentials." });
             }
 
-            // 3) Sign JWT
+            // 3) Generate and send OTP
+            const codeValue = generateOTP();
+            const expirationTime = new Date(
+                Date.now() +
+                parseInt(process.env.OTP_EXPIRATION_MINUTES, 10) * 60_000
+            );
+            await pool.execute(
+                `INSERT INTO OTPS
+                     (user_id, codeValue, expirationTime, isUsed, createdAt, updatedAt)
+                 VALUES (?, ?, ?, FALSE, NOW(), NOW())`,
+                [user.user_id, codeValue, expirationTime]
+            );
+
+            await sendOTPEmail(email, codeValue);
+
+            // 4) Respond
+            return res.json({ message: "OTP sent to your email." });
+        } catch (err) {
+            return next(err);
+        }
+    },
+
+    /**
+     * POST /api/auth/verify-login
+     * Body: { email, codeValue }
+     * Verifies the login OTP and returns a JWT.
+     */
+    verifyLoginOTP: async (req, res, next) => {
+        const { email, codeValue } = req.body;
+        if (!email || !codeValue) {
+            return res
+                .status(400)
+                .json({ error: "Email and code are required." });
+        }
+
+        try {
+            // 1) Find user
+            const [users] = await pool.execute(
+                "SELECT * FROM USERS WHERE email = ?",
+                [email]
+            );
+            if (users.length === 0) {
+                return res.status(401).json({ error: "Invalid credentials." });
+            }
+            const user = users[0];
+
+            // 2) Find matching OTP
+            const [otps] = await pool.execute(
+                `SELECT otp_id, expirationTime
+                 FROM OTPS
+                 WHERE user_id = ?
+                   AND codeValue = ?
+                   AND isUsed = FALSE
+                 ORDER BY createdAt DESC
+                     LIMIT 1`,
+                [user.user_id, codeValue]
+            );
+            if (otps.length === 0) {
+                return res.status(400).json({ error: "Invalid or expired OTP." });
+            }
+            const otp = otps[0];
+            if (new Date(otp.expirationTime) < new Date()) {
+                return res.status(400).json({ error: "OTP has expired." });
+            }
+
+            // 3) Mark OTP as used and sign JWT
+            await pool.execute(
+                "UPDATE OTPS SET isUsed = TRUE, updatedAt = NOW() WHERE otp_id = ?",
+                [otp.otp_id]
+            );
             const token = jwt.sign(
                 {
                     user_id:       user.user_id,

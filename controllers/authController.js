@@ -175,7 +175,10 @@ module.exports = {
             await sendOTPEmail(email, codeValue);
 
             // 4) Respond
-            return res.json({ message: "OTP sent to your email." });
+            return res.json({
+                message: "OTP sent to your email.",
+                accountType: user.accountType
+            });
         } catch (err) {
             return next(err);
         }

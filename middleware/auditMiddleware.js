@@ -13,11 +13,16 @@ const auditLog = async (req, res, next) => {
 
   const originalSend = res.send;
   res.send = function (body) {
+    const requestBody = { ...req.body };
+    if (requestBody.password) {
+      requestBody.password = '[REDACTED]';
+    }
+
     const logData = {
       changed_by: req.user ? req.user.user_id : null,
       endpoint: req.originalUrl,
       method: req.method,
-      request_body: JSON.stringify(req.body),
+      request_body: JSON.stringify(requestBody),
       response_status: res.statusCode
     };
 

@@ -43,8 +43,6 @@ router.get('/user/guardian/all-scans/user', userController.getScansByUser);
 
 router.post('/user/guardian/llm-ask-question', userController.guardianLLMAskQuestion);
 
-router.post('/user/guardian/llm-ask-question', userController.guardianLLMAskQuestion);
-
 router.get('/user/guardian/:conversationId/image', userController.getConversationImage)
 
 router.get('/user/guardian/conversation/:conversationId/history', userController.getConversationHistory)

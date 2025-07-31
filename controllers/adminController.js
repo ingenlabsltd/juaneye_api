@@ -759,4 +759,23 @@ module.exports = {
             return next(err);
         }
     },
+
+    getAuditTrail: async (req, res, next) => {
+        try {
+            const { startDate, endDate } = req.query;
+
+            if (!startDate || !endDate) {
+                return res.status(400).json({ error: 'Both startDate and endDate are required query parameters.' });
+            }
+
+            const [rows] = await pool.execute(
+                'SELECT * FROM CSB.AUDIT_TRAIL WHERE changedAt BETWEEN ? AND ?',
+                [startDate, endDate]
+            );
+
+            res.json(rows);
+        } catch (err) {
+            next(err);
+        }
+    },
 };

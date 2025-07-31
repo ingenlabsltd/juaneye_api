@@ -44,4 +44,6 @@ router.post('/users/:userId/guardians', adminController.bindGuardian);
 
 router.delete('/users/:userId/guardians/:guardianId', adminController.unbindGuardian);
 
+router.get('/admin/audit-trail', adminController.getAuditTrail);
+
 module.exports = router;

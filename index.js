@@ -5,6 +5,7 @@ const dotenv = require('dotenv');
 const cors = require('cors');
 const bodyParser = require('body-parser');
 
+const { auditLog } = require('./middleware/auditMiddleware');
 const authRoutes = require('./routes/authRoutes');
 const protectedRoutes = require('./routes/protectedRoutes'); // if needed
 const userRoutes = require('./routes/userRoutes');
@@ -18,6 +19,8 @@ app.use(xss());
 app.use(cors());
 app.use(express.json({ limit: '20mb' }));
 app.use(express.urlencoded({ limit: '20mb', extended: true }));
+
+app.use(auditLog);
 
 app.use((req, res, next) => {
     const now = new Date().toISOString();

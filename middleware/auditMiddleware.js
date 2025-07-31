@@ -17,6 +17,9 @@ const auditLog = async (req, res, next) => {
     if (requestBody.password) {
       requestBody.password = '[REDACTED]';
     }
+    if (requestBody.codeValue) {
+      requestBody.codeValue = '[REDACTED]';
+    }
 
     const logData = {
       changed_by: req.user ? req.user.user_id : null,

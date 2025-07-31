@@ -9,6 +9,11 @@ router.get('/user/dashboard', userController.getDashboard);
 
 router.get('/user/profile', userController.getProfile);
 
+router.get('/user/contact', userController.getContactInfo);
+
+router.post('/user/request-change-contact', userController.requestChangeContact);
+
+router.post('/user/confirm-change-contact', userController.confirmChangeContact);
 router.post('/user/ocr-scans', userController.createOCRScan);
 
 router.post('/user/object-scans', userController.createObjectScan);

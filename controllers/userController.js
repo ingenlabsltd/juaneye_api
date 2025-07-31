@@ -1,8 +1,8 @@
 // controllers/userController.js
 
 const pool = require('../db');
-const nodemailer = require('nodemailer');
 const dotenv = require('dotenv');
+const { generateOTP, sendOTPEmail, sendOTPSMS } = require('../utils/otpService');
 const fs = require('fs');
 const path = require('path');
 const multer = require('multer');
@@ -11,34 +11,7 @@ const axios = require('axios');
 
 dotenv.config();
 
-// ─── Helpers for Guardian Binding OTP ─────────────────────────────────────-
-function generateOTP() {
-    return Math.floor(100000 + Math.random() * 900000).toString();
-}
-
-async function sendOTPEmail(toEmail, codeValue) {
-    const transporter = nodemailer.createTransport({
-        host: 'smtp.gmail.com',
-        port: 465,
-        secure: true,
-        auth: {
-            user: process.env.EMAIL_USER,
-            pass: process.env.EMAIL_PASS,
-        },
-        tls: {
-            rejectUnauthorized: false,
-        },
-    });
-
-    const mailOptions = {
-        from: process.env.EMAIL_USER,
-        to: toEmail,
-        subject: 'Your Guardian Binding Code',
-        text: `Your binding OTP code is: ${codeValue}. Expires in ${process.env.OTP_EXPIRATION_MINUTES} minutes.`,
-    };
-
-    await transporter.sendMail(mailOptions);
-}
+// Helpers are now in utils/otpService.js
 
 const imageStorage = multer.diskStorage({
     destination: (req, file, cb) => {
@@ -98,6 +71,116 @@ const upload = multer({
     }).single('media');
 
 module.exports = {
+        /**
+         * GET /api/user/contact
+         * Returns the user's email and phone number.
+         */
+        getContactInfo: async (req, res, next) => {
+            try {
+                const { user_id } = req.user;
+                const [rows] = await pool.execute("SELECT email, phone FROM USERS WHERE user_id = ?", [user_id]);
+                if (rows.length === 0) {
+                    return res.status(404).json({ error: "User not found" });
+                }
+                res.json(rows[0]);
+            } catch (err) {
+                next(err);
+            }
+        },
+    
+        /**
+         * POST /api/user/request-change-contact
+         * Body: { email, phone }
+         * Initiates a contact information change by sending an OTP to the new email or phone.
+         */
+        requestChangeContact: async (req, res, next) => {
+            const { email, phone } = req.body;
+            if (!email && !phone) {
+                return res.status(400).json({ error: "New email or phone is required." });
+            }
+    
+            try {
+                if (email) {
+                    const [rows] = await pool.execute("SELECT user_id FROM USERS WHERE email = ?", [email]);
+                    if (rows.length > 0) {
+                        return res.status(409).json({ error: "That email is already registered." });
+                    }
+                }
+                if (phone) {
+                    const [rows] = await pool.execute("SELECT user_id FROM USERS WHERE phone = ?", [phone]);
+                    if (rows.length > 0) {
+                        return res.status(409).json({ error: "That phone number is already registered." });
+                    }
+                }
+    
+                const codeValue = generateOTP();
+                const expirationTime = new Date(
+                    Date.now() +
+                    parseInt(process.env.OTP_EXPIRATION_MINUTES, 10) * 60_000
+                );
+    
+                const { user_id } = req.user;
+                await pool.execute(
+                    `INSERT INTO OTPS (user_id, codeValue, expirationTime, isUsed, createdAt, updatedAt)
+                     VALUES (?, ?, ?, FALSE, NOW(), NOW())`,
+                    [user_id, codeValue, expirationTime]
+                );
+    
+                if (email) {
+                    await sendOTPEmail(email, codeValue);
+                }
+                if (phone) {
+                    await sendOTPSMS(phone, codeValue);
+                }
+    
+                res.json({ message: "OTP sent to the new contact method." });
+            } catch (err) {
+                next(err);
+            }
+        },
+    
+        /**
+         * POST /api/user/confirm-change-contact
+         * Body: { email, phone, codeValue }
+         * Confirms the contact information change by verifying the OTP.
+         */
+        confirmChangeContact: async (req, res, next) => {
+            const { email, phone, codeValue } = req.body;
+            if ((!email && !phone) || !codeValue) {
+                return res.status(400).json({ error: "A new contact method and OTP are required." });
+            }
+    
+            try {
+                const { user_id } = req.user;
+    
+                const [otps] = await pool.execute(
+                    `SELECT otp_id, expirationTime FROM OTPS WHERE user_id = ? AND codeValue = ? AND isUsed = FALSE ORDER BY createdAt DESC LIMIT 1`,
+                    [user_id, codeValue]
+                );
+    
+                if (otps.length === 0) {
+                    return res.status(400).json({ error: "Invalid or expired OTP." });
+                }
+    
+                const otp = otps[0];
+                if (new Date(otp.expirationTime) < new Date()) {
+                    return res.status(400).json({ error: "OTP has expired." });
+                }
+    
+                await pool.execute("UPDATE OTPS SET isUsed = TRUE, updatedAt = NOW() WHERE otp_id = ?", [otp.otp_id]);
+    
+                if (email) {
+                    await pool.execute("UPDATE USERS SET email = ? WHERE user_id = ?", [email, user_id]);
+                }
+                if (phone) {
+                    await pool.execute("UPDATE USERS SET phone = ? WHERE user_id = ?", [phone, user_id]);
+                }
+    
+                res.json({ message: "Contact information updated successfully." });
+            } catch (err) {
+                next(err);
+            }
+        },
         /**
          * GET /api/user/dashboard
          * Returns a welcome message plus the user’s scanCount and premium status.

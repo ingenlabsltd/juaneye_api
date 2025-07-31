@@ -46,4 +46,6 @@ router.delete('/users/:userId/guardians/:guardianId', adminController.unbindGuar
 
 router.get('/admin/audit-trail', adminController.getAuditTrail);
 
+router.get('/admin/users/:userId/logs', adminController.getUserLogs);
+
 module.exports = router;

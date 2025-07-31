@@ -778,4 +778,22 @@ module.exports = {
             next(err);
         }
     },
+
+    getUserLogs: async (req, res, next) => {
+        try {
+            const userId = parseInt(req.params.userId, 10);
+            if (isNaN(userId)) {
+                return res.status(400).json({ error: 'Invalid userId parameter.' });
+            }
+
+            const [rows] = await pool.execute(
+                'SELECT * FROM CSB.AUDIT_TRAIL WHERE changed_by = ?',
+                [userId]
+            );
+
+            res.json(rows);
+        } catch (err) {
+            next(err);
+        }
+    },
 };

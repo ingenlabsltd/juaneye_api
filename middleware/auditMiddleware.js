@@ -5,12 +5,9 @@ const auditLog = async (req, res, next) => {
   if (!req.path.startsWith('/api/')) {
     return next();
   }
-  const excludedRoutes = [
-    '/api/user/guardian/llm-ask-question',
-    '/api/user/llm-ask-question'
-  ];
+  const llmRoutePattern = /^\/api\/user\/(guardian\/)?(llm-ask-question|photo-upload|conversation\/.*|:?conversationId\/.*)/;
 
-  if (excludedRoutes.includes(req.path)) {
+  if (llmRoutePattern.test(req.path)) {
     return next();
   }
 

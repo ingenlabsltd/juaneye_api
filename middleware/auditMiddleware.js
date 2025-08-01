@@ -12,7 +12,9 @@ const auditLog = async (req, res, next) => {
   }
 
   const originalSend = res.send;
-  res.send = function (body) {
+  res.send = async function (body) {
+    originalSend.apply(res, arguments);
+
     const requestBody = { ...req.body };
     if (requestBody.password) {
       requestBody.password = '[REDACTED]';
@@ -20,7 +22,7 @@ const auditLog = async (req, res, next) => {
     if (requestBody.codeValue) {
       requestBody.codeValue = '[REDACTED]';
     }
-
+    
     const logData = {
       changed_by: req.user ? req.user.user_id : null,
       endpoint: req.originalUrl,
@@ -29,12 +31,24 @@ const auditLog = async (req, res, next) => {
       response_status: res.statusCode
     };
 
-    pool.execute(
-      'INSERT INTO CSB.AUDIT_TRAIL (changed_by, endpoint, method, request_body, response_status) VALUES (?, ?, ?, ?, ?)',
-      [logData.changed_by, logData.endpoint, logData.method, logData.request_body, logData.response_status]
-    );
-
-    originalSend.apply(res, arguments);
+    try {
+      await pool.execute(
+        'INSERT INTO CSB.AUDIT_TRAIL (changed_by, endpoint, method, request_body, response_status) VALUES (?, ?, ?, ?, ?)',
+        [logData.changed_by, logData.endpoint, logData.method, logData.request_body, logData.response_status]
+      );
+    } catch (error) {
+        if (error.code === 'ER_DATA_TOO_LONG') {
+            const truncatedBody = logData.request_body.substring(0, 2000);
+            pool.execute(
+              'INSERT INTO CSB.AUDIT_TRAIL (changed_by, endpoint, method, request_body, response_status) VALUES (?, ?, ?, ?, ?)',
+              [logData.changed_by, logData.endpoint, logData.method, truncatedBody, logData.response_status]
+            ).catch(err => {
+                console.error('Audit trail fallback insert failed:', err);
+            });
+        } else {
+            console.error('Audit trail error:', error);
+        }
+    }
   };
 
   next();

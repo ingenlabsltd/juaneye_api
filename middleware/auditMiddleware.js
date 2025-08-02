@@ -24,12 +24,55 @@ const auditLog = async (req, res, next) => {
     }
     
     const getAction = (method, path) => {
-        if (method === 'POST' && path === '/api/auth/login') return 'User Login';
+        // Auth Routes
         if (method === 'POST' && path === '/api/auth/signup') return 'User Registration';
-        if (method === 'POST' && path === '/api/auth/verify-login') return 'OTP Verification';
+        if (method === 'POST' && path === '/api/auth/login') return 'User Login';
         if (method === 'POST' && path === '/api/auth/forgot-password') return 'Forgot Password';
         if (method === 'POST' && path === '/api/auth/reset-password') return 'Reset Password';
+        if (method === 'POST' && path === '/api/auth/verify-login') return 'OTP Verification';
         if (method === 'POST' && path === '/api/auth/resend-otp') return 'Resend OTP';
+
+        // User Routes
+        if (method === 'GET' && path === '/api/user/dashboard') return 'Get User Dashboard';
+        if (method === 'GET' && path === '/api/user/profile') return 'Get User Profile';
+        if (method === 'POST' && path === '/api/user/ocr-scans') return 'Create OCR Scan';
+        if (method === 'POST' && path === '/api/user/object-scans') return 'Create Object Scan';
+        if (method === 'GET' && path === '/api/user/scans') return 'Get User Scans';
+        if (method === 'GET' && path.match(/^\/api\/user\/scans\/\w+$/)) return 'Get Single Scan';
+        if (method === 'PUT' && path.match(/^\/api\/user\/scans\/\w+$/)) return 'Update Scan';
+        if (method === 'DELETE' && path.match(/^\/api\/user\/scans\/\w+$/)) return 'Delete Scan';
+        if (method === 'POST' && path === '/api/user/photo-upload') return 'Upload Photo';
+        if (method === 'POST' && path === '/api/user/llm-ask-question') return 'Ask LLM';
+        if (method === 'GET' && path === '/api/user/get-guardians') return 'Get User Guardians';
+        if (method === 'DELETE' && path.match(/^\/api\/user\/remove-guardian\/\w+$/)) return 'Remove User Guardian';
+        if (method === 'POST' && path === '/api/user/guardian/bind-request') return 'Request Guardian Bind';
+        if (method === 'POST' && path === '/api/user/guardian/bind-confirm') return 'Confirm Guardian Bind';
+        if (method === 'GET' && path === '/api/user/guardian/bound-users') return 'Get Bound Users';
+        if (method === 'GET' && path === '/api/user/guardian/scan-stats') return 'Get Guardian Scan Stats';
+        if (method === 'GET' && path === '/api/user/guardian/all-scans/user') return 'Get Scans By User for Guardian';
+        if (method === 'POST' && path === '/api/user/guardian/llm-ask-question') return 'Guardian Ask LLM';
+        if (method === 'GET' && path.match(/^\/api\/user\/guardian\/\w+\/image$/)) return 'Get Conversation Image for Guardian';
+        if (method === 'GET' && path.match(/^\/api\/user\/guardian\/conversation\/\w+\/history$/)) return 'Get Conversation History for Guardian';
+
+        // Admin Routes
+        if (method === 'POST' && path === '/api/admin/users') return 'Admin: Create User';
+        if (method === 'GET' && path === '/api/admin/users') return 'Admin: List Users';
+        if (method === 'GET' && path.match(/^\/api\/admin\/users\/\w+$/)) return 'Admin: Get User By ID';
+        if (method === 'PUT' && path.match(/^\/api\/admin\/users\/\w+$/)) return 'Admin: Update User';
+        if (method === 'DELETE' && path.match(/^\/api\/admin\/users\/\w+$/)) return 'Admin: Delete User';
+        if (method === 'GET' && path.match(/^\/api\/admin\/users\/\w+\/scans$/)) return 'Admin: Get User Scans';
+        if (method === 'GET' && path.match(/^\/api\/admin\/scans\/\w+\/images$/)) return 'Admin: Get Conversation Images';
+        if (method === 'GET' && path.match(/^\/api\/admin\/conversations\/\w+\/history$/)) return 'Admin: Get Conversation History';
+        if (method === 'PUT' && path.match(/^\/api\/admin\/scans\/\w+$/)) return 'Admin: Update Scan';
+        if (method === 'DELETE' && path.match(/^\/api\/admin\/scans\/\w+$/)) return 'Admin: Delete Scan';
+        if (method === 'GET' && path === '/api/admin/dashboard') return 'Admin: Get Dashboard Stats';
+        if (method === 'GET' && path === '/api/admin/report') return 'Admin: Generate Report';
+        if (method === 'GET' && path.match(/^\/api\/users\/\w+\/guardians$/)) return 'Admin: Get User Guardians';
+        if (method === 'POST' && path.match(/^\/api\/users\/\w+\/guardians$/)) return 'Admin: Bind Guardian';
+        if (method === 'DELETE' && path.match(/^\/api\/users\/\w+\/guardians\/\w+$/)) return 'Admin: Unbind Guardian';
+        if (method === 'GET' && path === '/api/admin/audit-trail') return 'Admin: Get Audit Trail';
+        if (method === 'GET' && path.match(/^\/api\/admin\/users\/\w+\/logs$/)) return 'Admin: Get User Logs';
+
         return 'General';
     };
 

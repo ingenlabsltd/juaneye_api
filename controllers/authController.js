@@ -389,5 +389,48 @@ module.exports = {
         } catch (err) {
             return next(err);
         }
+    },
+
+    /**
+     * POST /api/auth/resend-otp
+     * Body: { email }
+     * Generates and emails a new OTP, invalidating any previous codes.
+     */
+    resendOTP: async (req, res, next) => {
+        const { email } = req.body;
+        if (!email) {
+            return res.status(400).json({ error: 'Email is required.' });
+        }
+
+        if (!isValidEmail(email)) {
+            return res.status(400).json({ error: 'Invalid email format.' });
+        }
+
+        try {
+            const [users] = await pool.execute('SELECT user_id FROM USERS WHERE email = ?', [email]);
+            if (users.length === 0) {
+                // To prevent user enumeration, we don't reveal if the email is registered
+                return res.json({ message: 'If your email is registered, a new OTP has been sent.' });
+            }
+            const userId = users[0].user_id;
+
+            // Invalidate all previous OTPs for this user
+            await pool.execute('UPDATE OTPS SET isUsed = TRUE, updatedAt = NOW() WHERE user_id = ? AND isUsed = FALSE', [userId]);
+
+            // Generate and send a new OTP
+            const codeValue = generateOTP();
+            const expirationTime = new Date(Date.now() + parseInt(process.env.OTP_EXPIRATION_MINUTES, 10) * 60_000);
+            await pool.execute(
+                `INSERT INTO OTPS (user_id, codeValue, expirationTime, isUsed, createdAt, updatedAt)
+                 VALUES (?, ?, ?, FALSE, NOW(), NOW())`,
+                [userId, codeValue, expirationTime]
+            );
+
+            await sendOTPEmail(email, codeValue);
+
+            return res.json({ message: 'A new OTP has been sent to your email.' });
+        } catch (err) {
+            return next(err);
+        }
     }
 };

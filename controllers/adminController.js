@@ -424,6 +424,12 @@ module.exports = {
                 return res.status(400).json({ error: 'Invalid userId parameter' });
             }
 
+            // Prevent admin from deleting their own account
+            if (req.user && req.user.user_id === userId) {
+                conn.release();
+                return res.status(403).json({ error: 'Admins cannot delete their own account.' });
+            }
+
             await conn.beginTransaction();
 
             // a) USER_GUARDIAN_LINK

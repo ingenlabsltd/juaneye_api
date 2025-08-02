@@ -18,4 +18,7 @@ router.post('/reset-password', authController.resetPassword);
 // ▸ POST /api/auth/verify-login
 router.post("/verify-login", authController.verifyLoginOTP);
 
+// POST /api/auth/resend-otp
+router.post('/resend-otp', authController.resendOTP);
+
 module.exports = router;

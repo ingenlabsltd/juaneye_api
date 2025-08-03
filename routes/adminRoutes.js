@@ -38,14 +38,18 @@ router.get('/admin/dashboard', adminController.getDashboardStats);
 
 router.get('/admin/report', adminController.generateReport);
 
-router.get('/users/:userId/guardians', adminController.getUserGuardians);
+router.get('/admin/users/:userId/guardians', adminController.getUserGuardians);
 
-router.post('/users/:userId/guardians', adminController.bindGuardian);
+router.post('/admin/users/:userId/guardians', adminController.bindGuardian);
 
-router.delete('/users/:userId/guardians/:guardianId', adminController.unbindGuardian);
+router.delete('/admin/users/:userId/guardians/:guardianId', adminController.unbindGuardian);
 
 router.get('/admin/audit-trail', adminController.getAuditTrail);
 
 router.get('/admin/users/:userId/logs', adminController.getUserLogs);
+
+router.get('/admin/guardians', adminController.listGuardians);
+
+router.get('/admin/guardians/:guardianId/bound-users', adminController.getGuardianBoundUsers);
 
 module.exports = router;

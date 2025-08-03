@@ -116,7 +116,7 @@ module.exports = {
      */
     getDashboardStats: async (req, res, next) => {
         try {
-            // 1) Count "online" users based on recent activity in scans tables
+            // 1) Count "recently logged in" users based on recent activity in scans tables
             //    Any user with ≥1 entry in OBJECT_SCANS, OCR_SCANS, or LLM_SCANS
             //    in the past 1 hour is considered online.
             const scanWindow = '1 HOUR';
@@ -135,7 +135,7 @@ module.exports = {
                                                                 WHERE createdAt >= DATE_SUB(NOW(), INTERVAL ${scanWindow})
                                                             ) AS recent_activity`
             );
-            const onlineUsers = onlineRows[0].cnt;
+            const recentlyLoggedInUsers = onlineRows[0].cnt;
 
             // 2) Total users
             const [totalRows] = await pool.execute(
@@ -171,7 +171,7 @@ module.exports = {
             );
 
             return res.json({
-                onlineUsers,
+                recentlyLoggedInUsers,
                 totalUsers,
                 freeUsers,
                 premiumUsers,
@@ -797,6 +797,37 @@ module.exports = {
                 [userId]
             );
 
+            res.json(rows);
+        } catch (err) {
+            next(err);
+        }
+    },
+
+    listGuardians: async (req, res, next) => {
+        try {
+            const [rows] = await pool.execute(
+                `SELECT user_id, email FROM USERS WHERE accountType = 'Guardian'`
+            );
+            res.json(rows);
+        } catch (err) {
+            next(err);
+        }
+    },
+
+    getGuardianBoundUsers: async (req, res, next) => {
+        try {
+            const guardianId = parseInt(req.params.guardianId, 10);
+            if (isNaN(guardianId)) {
+                return res.status(400).json({ error: 'Invalid guardianId parameter' });
+            }
+
+            const [rows] = await pool.execute(
+                `SELECT u.user_id, u.email
+                 FROM USER_GUARDIAN_LINK ugl
+                 JOIN USERS u ON u.user_id = ugl.user_id
+                 WHERE ugl.guardian_id = ?`,
+                [guardianId]
+            );
             res.json(rows);
         } catch (err) {
             next(err);

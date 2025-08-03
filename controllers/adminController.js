@@ -116,67 +116,89 @@ module.exports = {
      */
     getDashboardStats: async (req, res, next) => {
         try {
-            // 1) Count "recently logged in" users based on recent activity in scans tables
-            //    Any user with ≥1 entry in OBJECT_SCANS, OCR_SCANS, or LLM_SCANS
-            //    in the past 1 hour is considered online.
-            const scanWindow = '1 HOUR';
-            const [onlineRows] = await pool.execute(
-                `SELECT COUNT(DISTINCT user_id) AS cnt FROM (
-                                                                SELECT user_id
-                                                                FROM OBJECT_SCANS
-                                                                WHERE createdAt >= DATE_SUB(NOW(), INTERVAL ${scanWindow})
-                                                                UNION
-                                                                SELECT user_id
-                                                                FROM OCR_SCANS
-                                                                WHERE createdAt >= DATE_SUB(NOW(), INTERVAL ${scanWindow})
-                                                                UNION
-                                                                SELECT user_id
-                                                                FROM CONVERSATION_MESSAGES
-                                                                WHERE createdAt >= DATE_SUB(NOW(), INTERVAL ${scanWindow})
-                                                            ) AS recent_activity`
-            );
-            const recentlyLoggedInUsers = onlineRows[0].cnt;
+            // All queries are now in a transaction to ensure data consistency
+            const conn = await pool.getConnection();
+            await conn.beginTransaction();
 
-            // 2) Total users
-            const [totalRows] = await pool.execute(
-                `SELECT COUNT(*) AS cnt FROM USERS`
-            );
-            const totalUsers = totalRows[0].cnt;
+            try {
+                // 1) Recently logged in users
+                const scanWindow = '1 HOUR';
+                const [onlineRows] = await conn.execute(
+                    `SELECT COUNT(DISTINCT user_id) AS cnt
+                     FROM (
+                              SELECT user_id
+                              FROM OBJECT_SCANS
+                              WHERE createdAt >= DATE_SUB(NOW(), INTERVAL ${scanWindow})
+                              UNION
+                              SELECT user_id
+                              FROM OCR_SCANS
+                              WHERE createdAt >= DATE_SUB(NOW(), INTERVAL ${scanWindow})
+                              UNION
+                              SELECT user_id
+                              FROM CONVERSATION_MESSAGES
+                              WHERE createdAt >= DATE_SUB(NOW(), INTERVAL ${scanWindow})
+                          ) AS recent_activity`
+                );
+                const recentlyLoggedInUsers = onlineRows[0].cnt;
 
-            // 3) Free users
-            const [freeRows] = await pool.execute(
-                `SELECT COUNT(*) AS cnt
-                 FROM USERS
-                 WHERE isPremiumUser = FALSE`
-            );
-            const freeUsers = freeRows[0].cnt;
+                // 2) User stats
+                const [statRows] = await conn.execute(`
+                    SELECT
+                        COUNT(*)                                     AS total,
+                        SUM(CASE WHEN isPremiumUser = true THEN 1 ELSE 0 END)  AS premium,
+                        SUM(CASE WHEN accountType = 'Guardian' THEN 1 ELSE 0 END) AS guardian,
+                        SUM(CASE WHEN isPremiumUser = false AND accountType != 'Guardian' THEN 1 ELSE 0 END) AS free
+                    FROM USERS
+                    WHERE accountType != 'Admin'
+                `);
+                const {
+                    total,
+                    premium,
+                    guardian,
+                    free
+                } = statRows[0];
 
-            // 4) Premium users
-            const [premiumRows] = await pool.execute(
-                `SELECT COUNT(*) AS cnt
-                 FROM USERS
-                 WHERE isPremiumUser = TRUE`
-            );
-            const premiumUsers = premiumRows[0].cnt;
 
-            // 5) New signups last 7 days, formatted 'YYYY-MM-DD'
-            const [signupRows] = await pool.execute(
-                `SELECT
-               DATE_FORMAT(createdAt, '%Y-%m-%d') AS date,
-               COUNT(*)                    AS count
-             FROM USERS
-            WHERE createdAt >= DATE_SUB(CURDATE(), INTERVAL 6 DAY)
-            GROUP BY DATE_FORMAT(createdAt, '%Y-%m-%d')
-            ORDER BY DATE_FORMAT(createdAt, '%Y-%m-%d')`
-            );
+                // 3) New signups in the last 7 days
+                const [signupRows] = await conn.execute(`
+                    SELECT DATE_FORMAT(createdAt, '%Y-%m-%d') AS date,
+                           COUNT(*)                           AS count
+                    FROM USERS
+                    WHERE createdAt >= DATE_SUB(CURDATE(), INTERVAL 6 DAY)
+                    GROUP BY date
+                    ORDER BY date
+                `);
 
-            return res.json({
-                recentlyLoggedInUsers,
-                totalUsers,
-                freeUsers,
-                premiumUsers,
-                newSignupsLast7Days: signupRows
-            });
+                // 4) Top 10 most recent users for the table view
+                const [userRows] = await conn.execute(`
+                    SELECT user_id, email, accountType, isPremiumUser, scanCount
+                    FROM USERS
+                    WHERE accountType != 'Admin'
+                    ORDER BY createdAt DESC
+                    LIMIT 10
+                `);
+                const recentUsers = userRows.map(formatUserRow);
+
+                await conn.commit();
+                conn.release();
+
+                return res.json({
+                    recentlyLoggedInUsers: recentlyLoggedInUsers,
+                    userStats: {
+                        total: parseInt(total, 10) || 0,
+                        premium: parseInt(premium, 10) || 0,
+                        guardian: parseInt(guardian, 10) || 0,
+                        free: parseInt(free, 10) || 0,
+                    },
+                    newSignupsLast7Days: signupRows,
+                    recentUsers: recentUsers,
+                });
+
+            } catch (err) {
+                await conn.rollback();
+                conn.release();
+                return next(err)
+            }
         } catch (err) {
             return next(err);
         }

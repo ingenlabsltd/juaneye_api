@@ -790,18 +790,54 @@ module.exports = {
 
     getAuditTrail: async (req, res, next) => {
         try {
-            const { startDate, endDate } = req.query;
+            const { startDate, endDate, search } = req.query;
 
             if (!startDate || !endDate) {
                 return res.status(400).json({ error: 'Both startDate and endDate are required query parameters.' });
             }
 
-            const [rows] = await pool.execute(
-                'SELECT * FROM CSB.AUDIT_TRAIL WHERE changedAt BETWEEN ? AND ?',
-                [startDate, endDate]
-            );
+            let query = `
+                SELECT
+                    a.audit_id,
+                    a.changedAt,
+                    a.changed_by,
+                    u.email as user_email,
+                    a.action,
+                    a.status,
+                    a.ip_address,
+                    a.user_agent,
+                    a.request_body
+                FROM CSB.AUDIT_TRAIL a
+                LEFT JOIN CSB.USERS u ON a.changed_by = u.user_id
+                WHERE a.changedAt BETWEEN ? AND ?
+            `;
+            const params = [startDate, endDate];
 
-            res.json(rows);
+            if (search) {
+                query += ` AND (u.email LIKE ? OR a.action LIKE ? OR a.ip_address LIKE ?)`;
+                const searchTerm = `%${search}%`;
+                params.push(searchTerm, searchTerm, searchTerm);
+            }
+
+            query += ` ORDER BY a.changedAt DESC`;
+
+            const [rows] = await pool.execute(query, params);
+
+            const processedRows = rows.map(log => {
+                if (!log.user_email && log.request_body) {
+                    try {
+                        const body = JSON.parse(log.request_body);
+                        if (body && body.email) {
+                            log.user_email = body.email;
+                        }
+                    } catch (e) {
+                        // Not a valid JSON, ignore
+                    }
+                }
+                return log;
+            });
+
+            res.json(processedRows);
         } catch (err) {
             next(err);
         }

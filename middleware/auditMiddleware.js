@@ -25,55 +25,57 @@ const auditLog = async (req, res, next) => {
     
     const getAction = (method, path) => {
         // Auth Routes
-        if (method === 'POST' && path === '/api/auth/signup') return 'User Registration';
-        if (method === 'POST' && path === '/api/auth/login') return 'User Login';
-        if (method === 'POST' && path === '/api/auth/forgot-password') return 'Forgot Password';
-        if (method === 'POST' && path === '/api/auth/reset-password') return 'Reset Password';
-        if (method === 'POST' && path === '/api/auth/verify-login') return 'OTP Verification';
-        if (method === 'POST' && path === '/api/auth/resend-otp') return 'Resend OTP';
+        if (method === 'POST' && path === '/api/auth/signup') return 'Account: User Registration';
+        if (method === 'POST' && path === '/api/auth/login') return 'Account: User Login';
+        if (method === 'POST' && path === '/api/auth/forgot-password') return 'Account: Initiated Password Reset';
+        if (method === 'POST' && path === '/api/auth/reset-password') return 'Account: Completed Password Reset';
+        if (method === 'POST' && path === '/api/auth/verify-login') return 'Account: Verified OTP for Login';
+        if (method === 'POST' && path === '/api/auth/resend-otp') return 'Account: Requested New OTP';
 
         // User Routes
-        if (method === 'GET' && path === '/api/user/dashboard') return 'Get User Dashboard';
-        if (method === 'GET' && path === '/api/user/profile') return 'Get User Profile';
-        if (method === 'POST' && path === '/api/user/ocr-scans') return 'Create OCR Scan';
-        if (method === 'POST' && path === '/api/user/object-scans') return 'Create Object Scan';
-        if (method === 'GET' && path === '/api/user/scans') return 'Get User Scans';
-        if (method === 'GET' && path.match(/^\/api\/user\/scans\/\w+$/)) return 'Get Single Scan';
-        if (method === 'PUT' && path.match(/^\/api\/user\/scans\/\w+$/)) return 'Update Scan';
-        if (method === 'DELETE' && path.match(/^\/api\/user\/scans\/\w+$/)) return 'Delete Scan';
-        if (method === 'POST' && path === '/api/user/photo-upload') return 'Upload Photo';
-        if (method === 'POST' && path === '/api/user/llm-ask-question') return 'Ask LLM';
-        if (method === 'GET' && path === '/api/user/get-guardians') return 'Get User Guardians';
-        if (method === 'DELETE' && path.match(/^\/api\/user\/remove-guardian\/\w+$/)) return 'Remove User Guardian';
-        if (method === 'POST' && path === '/api/user/guardian/bind-request') return 'Request Guardian Bind';
-        if (method === 'POST' && path === '/api/user/guardian/bind-confirm') return 'Confirm Guardian Bind';
-        if (method === 'GET' && path === '/api/user/guardian/bound-users') return 'Get Bound Users';
-        if (method === 'GET' && path === '/api/user/guardian/scan-stats') return 'Get Guardian Scan Stats';
-        if (method === 'GET' && path === '/api/user/guardian/all-scans/user') return 'Get Scans By User for Guardian';
-        if (method === 'POST' && path === '/api/user/guardian/llm-ask-question') return 'Guardian Ask LLM';
-        if (method === 'GET' && path.match(/^\/api\/user\/guardian\/\w+\/image$/)) return 'Get Conversation Image for Guardian';
-        if (method === 'GET' && path.match(/^\/api\/user\/guardian\/conversation\/\w+\/history$/)) return 'Get Conversation History for Guardian';
+        if (method === 'GET' && path === '/api/user/dashboard') return 'User: Viewed Dashboard';
+        if (method === 'GET' && path === '/api/user/profile') return 'User: Viewed Profile';
+        if (method === 'POST' && path === '/api/user/ocr-scans') return 'Scan: Created OCR Scan';
+        if (method === 'POST' && path === '/api/user/object-scans') return 'Scan: Created Object Scan';
+        if (method === 'GET' && path === '/api/user/scans') return 'Scan: Viewed All Scans';
+        if (method === 'GET' && path.match(/^\/api\/user\/scans\/[^/]+$/)) return 'Scan: Viewed Single Scan';
+        if (method === 'PUT' && path.match(/^\/api\/user\/scans\/[^/]+$/)) return 'Scan: Updated Scan Details';
+        if (method === 'DELETE' && path.match(/^\/api\/user\/scans\/[^/]+$/)) return 'Scan: Deleted Scan';
+        if (method === 'POST' && path === '/api/user/photo-upload') return 'LLM: Uploaded Photo for Analysis';
+        if (method === 'POST' && path === '/api/user/llm-ask-question') return 'LLM: Asked a Question';
+        if (method === 'GET' && path === '/api/user/get-guardians') return 'Guardian: Viewed Guardians';
+        if (method === 'DELETE' && path.match(/^\/api\/user\/remove-guardian\/[^/]+$/)) return 'Guardian: Removed Guardian';
+        if (method === 'POST' && path === '/api/user/guardian/bind-request') return 'Guardian: Sent Binding Request';
+        if (method === 'POST' && path === '/api/user/guardian/bind-confirm') return 'Guardian: Confirmed Binding Request';
+        if (method === 'GET' && path === '/api/user/guardian/bound-users') return 'Guardian: Viewed Bound Users';
+        if (method === 'GET' && path === '/api/user/guardian/scan-stats') return 'Guardian: Viewed Scan Statistics';
+        if (method === 'GET' && path === '/api/user/guardian/all-scans/user') return 'Guardian: Viewed Scans of a User';
+        if (method === 'POST' && path === '/api/user/guardian/llm-ask-question') return 'Guardian: Asked LLM a Question';
+        if (method === 'GET' && path.match(/^\/api\/user\/guardian\/[^/]+\/image$/)) return 'Guardian: Viewed Conversation Image';
+        if (method === 'GET' && path.match(/^\/api\/user\/guardian\/conversation\/[^/]+\/history$/)) return 'Guardian: Viewed Conversation History';
 
         // Admin Routes
-        if (method === 'POST' && path === '/api/admin/users') return 'Admin: Create User';
-        if (method === 'GET' && path === '/api/admin/users') return 'Admin: List Users';
-        if (method === 'GET' && path.match(/^\/api\/admin\/users\/\w+$/)) return 'Admin: Get User By ID';
-        if (method === 'PUT' && path.match(/^\/api\/admin\/users\/\w+$/)) return 'Admin: Update User';
-        if (method === 'DELETE' && path.match(/^\/api\/admin\/users\/\w+$/)) return 'Admin: Delete User';
-        if (method === 'GET' && path.match(/^\/api\/admin\/users\/\w+\/scans$/)) return 'Admin: Get User Scans';
-        if (method === 'GET' && path.match(/^\/api\/admin\/scans\/\w+\/images$/)) return 'Admin: Get Conversation Images';
-        if (method === 'GET' && path.match(/^\/api\/admin\/conversations\/\w+\/history$/)) return 'Admin: Get Conversation History';
-        if (method === 'PUT' && path.match(/^\/api\/admin\/scans\/\w+$/)) return 'Admin: Update Scan';
-        if (method === 'DELETE' && path.match(/^\/api\/admin\/scans\/\w+$/)) return 'Admin: Delete Scan';
-        if (method === 'GET' && path === '/api/admin/dashboard') return 'Admin: Get Dashboard Stats';
-        if (method === 'GET' && path === '/api/admin/report') return 'Admin: Generate Report';
-        if (method === 'GET' && path.match(/^\/api\/users\/\w+\/guardians$/)) return 'Admin: Get User Guardians';
-        if (method === 'POST' && path.match(/^\/api\/users\/\w+\/guardians$/)) return 'Admin: Bind Guardian';
-        if (method === 'DELETE' && path.match(/^\/api\/users\/\w+\/guardians\/\w+$/)) return 'Admin: Unbind Guardian';
-        if (method === 'GET' && path === '/api/admin/audit-trail') return 'Admin: Get Audit Trail';
-        if (method === 'GET' && path.match(/^\/api\/admin\/users\/\w+\/logs$/)) return 'Admin: Get User Logs';
+        if (method === 'POST' && path === '/api/admin/users') return 'Admin: Created a New User';
+        if (method === 'GET' && path === '/api/admin/users') return 'Admin: Viewed All Users';
+        if (method === 'GET' && path.match(/^\/api\/admin\/users\/[^/]+$/)) return 'Admin: Viewed User Details';
+        if (method === 'PUT' && path.match(/^\/api\/admin\/users\/[^/]+$/)) return 'Admin: Updated User Details';
+        if (method === 'DELETE' && path.match(/^\/api\/admin\/users\/[^/]+$/)) return 'Admin: Deleted a User';
+        if (method === 'GET' && path.match(/^\/api\/admin\/users\/[^/]+\/scans$/)) return 'Admin: Viewed User Scans';
+        if (method === 'GET' && path.match(/^\/api\/admin\/scans\/[^/]+\/images$/)) return 'Admin: Viewed Conversation Images';
+        if (method === 'GET' && path.match(/^\/api\/admin\/conversations\/[^/]+\/history$/)) return 'Admin: Viewed Conversation History';
+        if (method === 'PUT' && path.match(/^\/api\/admin\/scans\/[^/]+$/)) return 'Admin: Updated Scan Details';
+        if (method === 'DELETE' && path.match(/^\/api\/admin\/scans\/[^/]+$/)) return 'Admin: Deleted a Scan';
+        if (method === 'GET' && path === '/api/admin/dashboard') return 'Admin: Viewed Dashboard';
+        if (method === 'GET' && path === '/api/admin/report') return 'Admin: Generated a Report';
+        if (method === 'GET' && path.match(/^\/api\/admin\/users\/[^/]+\/guardians$/)) return 'Admin: Viewed User Guardians';
+        if (method === 'POST' && path.match(/^\/api\/admin\/users\/[^/]+\/guardians$/)) return 'Admin: Bound a Guardian to a User';
+        if (method === 'DELETE' && path.match(/^\/api\/admin\/users\/[^/]+\/guardians\/[^/]+$/)) return 'Admin: Unbound a Guardian from a User';
+        if (method === 'GET' && path === '/api/admin/audit-trail') return 'Admin: Viewed Audit Trail';
+        if (method === 'GET' && path.match(/^\/api\/admin\/users\/[^/]+\/logs$/)) return 'Admin: Viewed User Logs';
+        if (method === 'GET' && path === '/api/admin/guardians') return 'Admin: Viewed All Guardians';
+        if (method === 'GET' && path.match(/^\/api\/admin\/guardians\/[^/]+\/bound-users$/)) return 'Admin: Viewed Users Bound to a Guardian';
 
-        return 'General';
+        return `Unknown action for ${method} ${path}`;
     };
 
     const getStatus = (statusCode) => {

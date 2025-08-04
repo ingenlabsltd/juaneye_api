@@ -40,11 +40,11 @@ app.use(bodyParser.json());
 app.use('/api/auth', authRoutes);
 
 // 2) User routes (all /api/user/* require a valid JWT)
-app.use('/api', adminRoutes);
+app.use('/api', userRoutes);
 
 
 // 4) Admin‐only endpoints (must come AFTER user routes, so /api/admin/* is distinct)
-app.use('/api', userRoutes);
+app.use('/api', adminRoutes);
 
 // Health check
 app.get('/', (req, res) => {

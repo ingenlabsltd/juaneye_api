@@ -46,7 +46,8 @@ router.delete('/admin/users/:userId/guardians/:guardianId', adminController.unbi
 
 router.get('/admin/audit-trail', adminController.getAuditTrail);
 
-router.get('/admin/users/:userId/logs', adminController.getUserLogs);
+
+router.get('/admin/users/:userId/activity', adminController.getUserActivity);
 
 router.get('/admin/guardians', adminController.listGuardians);
 

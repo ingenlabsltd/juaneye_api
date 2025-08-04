@@ -126,7 +126,7 @@ module.exports = {
                 const [onlineRows] = await conn.execute(
                     `SELECT COUNT(DISTINCT user_id) AS cnt
                      FROM (
-                              SELECT user_id
+                               SELECT user_id
                               FROM OBJECT_SCANS
                               WHERE createdAt >= DATE_SUB(NOW(), INTERVAL ${scanWindow})
                               UNION
@@ -843,23 +843,6 @@ module.exports = {
         }
     },
 
-    getUserLogs: async (req, res, next) => {
-        try {
-            const userId = parseInt(req.params.userId, 10);
-            if (isNaN(userId)) {
-                return res.status(400).json({ error: 'Invalid userId parameter.' });
-            }
-
-            const [rows] = await pool.execute(
-                'SELECT * FROM CSB.AUDIT_TRAIL WHERE changed_by = ?',
-                [userId]
-            );
-
-            res.json(rows);
-        } catch (err) {
-            next(err);
-        }
-    },
 
     listGuardians: async (req, res, next) => {
         try {
@@ -885,6 +868,26 @@ module.exports = {
                  JOIN USERS u ON u.user_id = ugl.user_id
                  WHERE ugl.guardian_id = ?`,
                 [guardianId]
+            );
+            res.json(rows);
+        } catch (err) {
+            next(err);
+        }
+    },
+
+    getUserActivity: async (req, res, next) => {
+        try {
+            const userId = parseInt(req.params.userId, 10);
+            if (isNaN(userId)) {
+                return res.status(400).json({ error: 'Invalid userId parameter' });
+            }
+
+            const [rows] = await pool.execute(
+                `SELECT action, changedAt, status
+                 FROM AUDIT_TRAIL
+                 WHERE changed_by = ?
+                 ORDER BY changedAt DESC`,
+                [userId]
             );
             res.json(rows);
         } catch (err) {

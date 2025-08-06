@@ -11,6 +11,8 @@ router.get('/user/profile', userController.getProfile);
 
 router.get('/user/premium/status', userController.getPremiumStatus);
 
+router.post('/user/premium/purchase', userController.purchasePremium);
+
 router.post('/user/ocr-scans', userController.createOCRScan);
 
 router.post('/user/object-scans', userController.createObjectScan);

@@ -1542,5 +1542,53 @@ module.exports = {
         } catch (err) {
             next(err);
         }
+    },
+
+    /**
+     * POST /api/user/premium/purchase
+     * Body: { amount, paymentMethod }
+     * Records a premium purchase and updates the user's status.
+     */
+    purchasePremium: async (req, res, next) => {
+        const conn = await pool.getConnection();
+        try {
+            const { user_id } = req.user;
+            const { amount, paymentMethod } = req.body;
+
+            if (typeof amount !== 'number' || amount <= 0 || typeof paymentMethod !== 'string' || !paymentMethod.trim()) {
+                return res.status(400).json({ error: 'Invalid amount or paymentMethod.' });
+            }
+
+            await conn.beginTransaction();
+
+            // 1. Insert payment record
+            await conn.execute(
+                `INSERT INTO PAYMENTS (user_id, amount, paymentMethod)
+                 VALUES (?, ?, ?)`,
+                [user_id, amount, paymentMethod]
+            );
+
+            // 2. Update user to premium
+            const expirationDate = new Date();
+            expirationDate.setMonth(expirationDate.getMonth() + 1);
+
+            await conn.execute(
+                `UPDATE USERS
+                 SET isPremiumUser   = TRUE,
+                     premiumExpiration = ?
+                 WHERE user_id = ?`,
+                [expirationDate, user_id]
+            );
+
+            await conn.commit();
+
+            res.json({ message: 'Premium purchased successfully.' });
+
+        } catch (err) {
+            await conn.rollback();
+            next(err);
+        } finally {
+            conn.release();
+        }
     }
 }

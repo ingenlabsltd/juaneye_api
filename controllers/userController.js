@@ -1512,5 +1512,35 @@ module.exports = {
         } catch (err) {
             next(err);
         }
+    },
+
+    /**
+     * GET /api/user/premium/status
+     * Returns the user’s premium status and expiration date.
+     */
+    getPremiumStatus: async (req, res, next) => {
+        try {
+            const { user_id } = req.user;
+
+            const [rows] = await pool.execute(
+                `SELECT isPremiumUser, premiumExpiration
+                 FROM USERS
+                 WHERE user_id = ?`,
+                [user_id]
+            );
+
+            if (!rows.length) {
+                return res.status(404).json({ error: 'User not found' });
+            }
+
+            const { isPremiumUser, premiumExpiration } = rows[0];
+
+            res.json({
+                isPremiumUser: !!isPremiumUser,
+                premiumExpiration: premiumExpiration
+            });
+        } catch (err) {
+            next(err);
+        }
     }
 }

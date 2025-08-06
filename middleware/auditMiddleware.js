@@ -76,7 +76,10 @@ const auditLog = async (req, res, next) => {
     };
 
     const getStatus = (statusCode) => {
-      return statusCode >= 200 && statusCode < 300 ? 'SUCCESS' : 'FAIL';
+      if ((statusCode >= 200 && statusCode < 300) || statusCode === 304) {
+        return 'SUCCESS';
+      }
+      return 'FAIL';
     };
     
     const logData = {

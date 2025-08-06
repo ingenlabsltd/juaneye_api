@@ -14,7 +14,8 @@ function formatUserRow(row) {
         userType: row.accountType, // 'User' | 'Guardian' | 'Admin'
         subscriptionType: row.isPremiumUser ? 'Premium' : 'Free',
         scanCount: row.scanCount,
-        guardianModeAccess: row.accountType === 'Guardian' ? 'Yes' : 'No'
+        guardianModeAccess: row.accountType === 'Guardian' ? 'Yes' : 'No',
+        premium_expiration: row.premiumExpiration
     };
 }
 
@@ -219,7 +220,7 @@ module.exports = {
 
             let countSql = 'SELECT COUNT(*) AS cnt FROM USERS';
             let dataSql =
-                `SELECT user_id, email, accountType, isPremiumUser, scanCount
+                `SELECT user_id, email, accountType, isPremiumUser, scanCount, premiumExpiration
          FROM USERS`;
             const countParams = [];
             const dataParams = [];
@@ -793,8 +794,57 @@ module.exports = {
             const { startDate, endDate, search } = req.query;
 
             if (!startDate || !endDate) {
-                return res.status(400).json({ error: 'Both startDate and endDate are required query parameters.' });
+                // Fetch all records if no date range is provided.
+                const [rows] = await pool.execute(`
+                    SELECT
+                        a.audit_id,
+                        a.changedAt,
+                        a.changed_by,
+                        u.email as user_email,
+                        a.action,
+                        a.status,
+                        a.ip_address,
+                        a.user_agent,
+                        a.request_body
+                    FROM CSB.AUDIT_TRAIL a
+                    LEFT JOIN CSB.USERS u ON a.changed_by = u.user_id
+                    ORDER BY a.changedAt DESC
+                `);
+                const processedRows = await Promise.all(rows.map(async (log) => {
+                    let email = log.user_email;
+                    if (!email && log.request_body) {
+                        try {
+                            const body = JSON.parse(log.request_body);
+                            if (body && body.email) {
+                                const [userRows] = await pool.execute('SELECT email FROM USERS WHERE email = ?', [body.email]);
+                                if (userRows.length > 0) {
+                                    email = userRows[0].email;
+                                } else {
+                                    email = body.email;
+                                }
+                            }
+                        } catch (e) {
+                            // Not a valid JSON, ignore
+                        }
+                    }
+                    if (email) {
+                        log.changed_by = email;
+                    } else if (log.changed_by) {
+                        log.changed_by = `User ID: ${log.changed_by}`;
+                    } else {
+                        log.changed_by = 'System/Unknown';
+                    }
+                    delete log.user_email;
+                    return log;
+                }));
+                return res.json(processedRows);
             }
+
+            const start = new Date(startDate);
+            start.setHours(0, 0, 0, 0);
+
+            const end = new Date(endDate);
+            end.setHours(23, 59, 59, 999);
 
             let query = `
                 SELECT
@@ -809,9 +859,9 @@ module.exports = {
                     a.request_body
                 FROM CSB.AUDIT_TRAIL a
                 LEFT JOIN CSB.USERS u ON a.changed_by = u.user_id
-                WHERE a.changedAt BETWEEN ? AND ?
+                WHERE a.changedAt >= ? AND a.changedAt <= ?
             `;
-            const params = [startDate, endDate];
+            const params = [start, end];
 
             if (search) {
                 query += ` AND (u.email LIKE ? OR a.action LIKE ? OR a.ip_address LIKE ?)`;
@@ -823,20 +873,33 @@ module.exports = {
 
             const [rows] = await pool.execute(query, params);
 
-            const processedRows = rows.map(log => {
-                if (!log.user_email && log.request_body) {
+            const processedRows = await Promise.all(rows.map(async (log) => {
+                let email = log.user_email;
+                if (!email && log.request_body) {
                     try {
                         const body = JSON.parse(log.request_body);
                         if (body && body.email) {
-                            log.user_email = body.email;
+                            const [userRows] = await pool.execute('SELECT email FROM USERS WHERE email = ?', [body.email]);
+                            if (userRows.length > 0) {
+                                email = userRows[0].email;
+                            } else {
+                                email = body.email;
+                            }
                         }
                     } catch (e) {
                         // Not a valid JSON, ignore
                     }
                 }
+                if (email) {
+                    log.changed_by = email;
+                } else if (log.changed_by) {
+                    log.changed_by = `User ID: ${log.changed_by}`;
+                } else {
+                    log.changed_by = 'System/Unknown';
+                }
+                delete log.user_email;
                 return log;
-            });
-
+            }));
             res.json(processedRows);
         } catch (err) {
             next(err);
@@ -889,6 +952,79 @@ module.exports = {
                  ORDER BY changedAt DESC`,
                 [userId]
             );
+            res.json(rows);
+        } catch (err) {
+            next(err);
+        }
+    },
+makeUserPremium: async (req, res, next) => {
+        try {
+            const userId = parseInt(req.params.userId, 10);
+            if (isNaN(userId)) {
+                return res.status(400).json({ error: 'Invalid userId parameter' });
+            }
+
+            // Set premium status and a 1-year expiration date
+            const expirationDate = new Date();
+            expirationDate.setMonth(expirationDate.getMonth() + 1);
+
+            const [result] = await pool.execute(
+                `UPDATE USERS
+                 SET isPremiumUser = ?, premiumExpiration = ?, updatedAt = NOW()
+                 WHERE user_id = ?`,
+                [1, expirationDate, userId]
+            );
+
+            if (result.affectedRows === 0) {
+                return res.status(404).json({ error: 'User not found' });
+            }
+
+            res.json({ message: 'User successfully upgraded to premium.' });
+        } catch (err) {
+            next(err);
+        }
+    },
+
+    removeUserPremium: async (req, res, next) => {
+        try {
+            const userId = parseInt(req.params.userId, 10);
+            if (isNaN(userId)) {
+                return res.status(400).json({ error: 'Invalid userId parameter' });
+            }
+
+            // Revoke premium status
+            const [result] = await pool.execute(
+                `UPDATE USERS
+                 SET isPremiumUser = ?, premiumExpiration = NULL, updatedAt = NOW()
+                 WHERE user_id = ?`,
+                [0, userId]
+            );
+
+            if (result.affectedRows === 0) {
+                return res.status(404).json({ error: 'User not found' });
+            }
+
+            res.json({ message: 'Premium status successfully revoked.' });
+        } catch (err) {
+            next(err);
+        }
+    },
+
+     getUserTransactions: async (req, res, next) => {
+        try {
+            const userId = parseInt(req.params.userId, 10);
+            if (isNaN(userId)) {
+                return res.status(400).json({ error: 'Invalid userId parameter' });
+            }
+
+            const [rows] = await pool.execute(
+                `SELECT transaction_id, amount, status, created_at
+                 FROM PAYMENTS
+                 WHERE user_id = ?
+                 ORDER BY created_at DESC`,
+                [userId]
+            );
+
             res.json(rows);
         } catch (err) {
             next(err);

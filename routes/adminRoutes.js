@@ -23,6 +23,11 @@ router.get('/admin/users/:userId', adminController.getUserById);
 router.put('/admin/users/:userId', adminController.updateUser);
 
 router.delete('/admin/users/:userId', adminController.deleteUser);
+router.get('/admin/users/:userId/transactions', adminController.getUserTransactions);
+
+router.put('/admin/users/:userId/make-premium', adminController.makeUserPremium);
+
+router.put('/admin/users/:userId/remove-premium', adminController.removeUserPremium);
 
 router.get('/admin/users/:userId/scans', adminController.getUserScans);
 

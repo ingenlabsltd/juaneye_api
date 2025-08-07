@@ -85,9 +85,15 @@ const auditLog = async (req, res, next) => {
       userAgent = `${userAgent} (Device Model: ${deviceModel}, Device Type: ${deviceType})`;
     }
 
+    const action = getAction(req.method, req.originalUrl.split('?')[0]);
+
+    if (action === 'Admin: Viewed Audit Trail' || action === 'Admin: Viewed User Scans') {
+      return;
+    }
+
     const logData = {
       changed_by: req.user ? req.user.user_id : null,
-      action: getAction(req.method, req.originalUrl.split('?')[0]),
+      action: action,
       status: getStatus(res.statusCode),
       endpoint: req.originalUrl,
       method: req.method,

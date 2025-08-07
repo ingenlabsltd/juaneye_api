@@ -2,26 +2,11 @@ const pool = require('../db');
 
 // AUDIT MIDDLEWARE
 const auditLog = async (req, res, next) => {
-  const llmRoutePattern = /^(\/api)?\/user\/(guardian\/)?(llm-ask-question|photo-upload|conversation\/.*|:?conversationId\/.*)/;
-
-  if (llmRoutePattern.test(req.originalUrl)) {
-    return next();
-  }
 
   const originalSend = res.send;
   res.send = async function (body) {
     originalSend.apply(res, arguments);
 
-    const requestBody = { ...req.body };
-    if (requestBody.password) {
-      requestBody.password = '[REDACTED]';
-    }
-    if (requestBody.codeValue) {
-      requestBody.codeValue = '[REDACTED]';
-    }
-    if (requestBody.voice) {
-      requestBody.voice = '[OMITTED]';
-    }
     
     const getAction = (method, path) => {
         // Auth Routes
@@ -106,7 +91,7 @@ const auditLog = async (req, res, next) => {
       status: getStatus(res.statusCode),
       endpoint: req.originalUrl,
       method: req.method,
-      request_body: JSON.stringify(requestBody),
+      request_body: '{}',
       response_status: res.statusCode,
       ip_address: (req.headers['x-forwarded-for'] || req.ip).split(',')[0].trim(),
       user_agent: userAgent,

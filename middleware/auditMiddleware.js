@@ -19,6 +19,9 @@ const auditLog = async (req, res, next) => {
     if (requestBody.codeValue) {
       requestBody.codeValue = '[REDACTED]';
     }
+    if (requestBody.voice) {
+      requestBody.voice = '[OMITTED]';
+    }
     
     const getAction = (method, path) => {
         // Auth Routes

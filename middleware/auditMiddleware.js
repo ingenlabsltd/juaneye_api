@@ -87,7 +87,7 @@ const auditLog = async (req, res, next) => {
 
     const action = getAction(req.method, req.originalUrl.split('?')[0]);
 
-    if (action === 'Admin: Viewed Audit Trail' || action === 'Admin: Viewed User Scans') {
+    if (action === 'Admin: Viewed Audit Trail' || action === 'Admin: Viewed User Scans' || action === "User: Viewed Profile") {
       return;
     }
 

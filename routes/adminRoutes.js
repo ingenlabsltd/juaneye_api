@@ -4,6 +4,7 @@ const express = require('express');
 const router = express.Router();
 const { verifyToken } = require('../middleware/authMiddleware');
 const adminController = require('../controllers/adminController');
+const { getUserTransactions } = require('../controllers/adminController');
 const userController = require("../controllers/userController");
 
 // Protect everything below with JWT + Admin‐only check
@@ -23,7 +24,10 @@ router.get('/admin/users/:userId', adminController.getUserById);
 router.put('/admin/users/:userId', adminController.updateUser);
 
 router.delete('/admin/users/:userId', adminController.deleteUser);
+
 router.get('/admin/users/:userId/transactions', adminController.getUserTransactions);
+
+router.get('/users/:userId/transactions', getUserTransactions);
 
 router.put('/admin/users/:userId/make-premium', adminController.makeUserPremium);
 

@@ -1010,24 +1010,16 @@ makeUserPremium: async (req, res, next) => {
         }
     },
 
-     getUserTransactions: async (req, res, next) => {
+    getUserTransactions: async (req, res) => {
         try {
-            const userId = parseInt(req.params.userId, 10);
-            if (isNaN(userId)) {
-                return res.status(400).json({ error: 'Invalid userId parameter' });
-            }
-
-            const [rows] = await pool.execute(
-                `SELECT transaction_id, amount, status, created_at
-                 FROM PAYMENTS
-                 WHERE user_id = ?
-                 ORDER BY created_at DESC`,
+            const { userId } = req.params;
+            const [transactions] = await pool.execute(
+                'SELECT * FROM PAYMENTS WHERE user_id = ?',
                 [userId]
             );
-
-            res.json(rows);
-        } catch (err) {
-            next(err);
+            return res.status(200).json(transactions);
+        } catch (error) {
+            return res.status(500).json({ message: 'Error fetching user transactions' });
         }
     },
 };

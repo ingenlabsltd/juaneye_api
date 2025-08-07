@@ -53,6 +53,10 @@ const auditLog = async (req, res, next) => {
         if (method === 'POST' && /^(\/api)?\/user\/guardian\/llm-ask-question\/?$/.test(path)) return 'Guardian: Asked LLM a Question';
         if (method === 'GET' && /^(\/api)?\/user\/guardian\/[^/]+\/image\/?$/.test(path)) return 'Guardian: Viewed Conversation Image';
         if (method === 'GET' && /^(\/api)?\/user\/guardian\/conversation\/[^/]+\/history\/?$/.test(path)) return 'Guardian: Viewed Conversation History';
+        if (method === 'GET' && /^(\/api)?\/user\/premium\/status\/?$/.test(path)) return 'User: Checked Premium Status';
+        if (method === 'POST' && /^(\/api)?\/user\/premium\/purchase\/?$/.test(path)) return 'User: Purchased Premium';
+        if (method === 'PUT' && /^(\/api)?\/user\/guardian\/scans\/[^/]+\/voice\/?$/.test(path)) return 'Guardian: Updated/Added Scan Voice Note';
+        if (method === 'GET' && /^(\/api)?\/user\/guardian\/scans\/[^/]+\/voice\/?$/.test(path)) return 'Guardian: Fetched Scan Voice Note';
 
         // Admin Routes
         if (method === 'POST' && /^(\/api)?\/admin\/users\/?$/.test(path)) return 'Admin: Created a New User';
@@ -74,9 +78,13 @@ const auditLog = async (req, res, next) => {
         if (method === 'GET' && /^(\/api)?\/admin\/users\/[^/]+\/logs\/?$/.test(path)) return 'Admin: Viewed User Logs';
         if (method === 'GET' && /^(\/api)?\/admin\/guardians\/?$/.test(path)) return 'Admin: Viewed All Guardians';
         if (method === 'GET' && /^(\/api)?\/admin\/guardians\/[^/]+\/bound-users\/?$/.test(path)) return 'Admin: Viewed Users Bound to a Guardian';
-
-        return `Unknown action for ${method} ${path}`;
-    };
+        if (method === 'GET' && /^(\/api)?\/admin\/users\/[^/]+\/transactions\/?$/.test(path)) return 'Admin: Viewed User Transactions';
+        if (method === 'PUT' && /^(\/api)?\/admin\/users\/[^/]+\/make-premium\/?$/.test(path)) return 'Admin: Made User Premium';
+        if (method === 'PUT' && /^(\/api)?\/admin\/users\/[^/]+\/remove-premium\/?$/.test(path)) return 'Admin: Removed User Premium';
+        if (method === 'GET' && /^(\/api)?\/admin\/users\/[^/]+\/activity\/?$/.test(path)) return 'Admin: Viewed User Activity';
+ 
+         return `Unknown action for ${method} ${path}`;
+     };
 
     const getStatus = (statusCode) => {
       if ((statusCode >= 200 && statusCode < 300) || statusCode === 304) {

@@ -1593,65 +1593,115 @@ module.exports = {
     }
 ,
     /**
-     * @route PUT /api/user/scans/:scanId/voice
-     * @description Update the voice recording for an OCR scan.
-     * @access Private
+     * PUT /api/user/guardian/scans/:scanId/voice
+     * Body: { voice } (base64)
+     * Updates a scan's voice recording if authorized (bound Guardian).
      */
     updateScanVoice: async (req, res, next) => {
+        const conn = await pool.getConnection();
         try {
-            const { scanId } = req.params;
+            const { user_id: requesterId, accountType } = req.user;
+            const scanId = parseInt(req.params.scanId, 10);
             const { voice } = req.body;
-            const userId = req.user.user_id;
 
-            if (!voice) {
-                return res.status(400).json({ error: 'Voice data is required.' });
+            if (isNaN(scanId) || typeof voice !== 'string') {
+                return res.status(400).json({ error: 'Invalid input' });
             }
 
-            const voiceBuffer = Buffer.from(voice, 'base64');
+            if (accountType !== 'Guardian') {
+                return res.status(403).json({ error: 'Only Guardians can update voice recordings.' });
+            }
 
-            const [result] = await pool.execute(
-                `UPDATE OCR_SCANS
-                 SET voice = ?
-                 WHERE ocr_id = ? AND user_id = ?`,
-                [voiceBuffer, scanId, userId]
+            // 1) figure out who owns this scan - only OCR scans have voice
+            const [ownerRows] = await conn.execute(
+                `SELECT user_id FROM OCR_SCANS WHERE ocr_id = ?`,
+                [scanId]
             );
 
-            if (result.affectedRows === 0) {
-                return res.status(404).json({ error: 'Scan not found or not owned by user.' });
+            if (!ownerRows.length) {
+                return res.status(404).json({ error: 'OCR scan not found' });
             }
 
-            res.json({ message: 'Voice updated successfully' });
+            const ownerId = ownerRows[0].user_id;
+
+            // 2) check permissions: must be a Guardian bound to that owner
+            const [links] = await conn.execute(
+                `SELECT 1 FROM USER_GUARDIAN_LINK WHERE guardian_id = ? AND user_id = ?`,
+                [requesterId, ownerId]
+            );
+
+            if (links.length === 0) {
+                return res.status(403).json({ error: 'Not authorized to update this scan.' });
+            }
+
+            // 3) finally, perform the update
+            const voiceBuffer = Buffer.from(voice, 'base64');
+            await conn.execute(
+                `UPDATE OCR_SCANS SET voice = ? WHERE ocr_id = ?`,
+                [voiceBuffer, scanId]
+            );
+
+            res.json({ message: 'Voice recording updated successfully.' });
         } catch (err) {
             next(err);
+        } finally {
+            conn.release();
         }
     },
 
     /**
-     * @route GET /api/user/scans/:scanId/voice
-     * @description Get the voice recording for an OCR scan.
-     * @access Private
+     * GET /api/user/guardian/scans/:scanId/voice
+     * Retrieves a scan's voice recording if authorized (bound Guardian).
      */
     getScanVoice: async (req, res, next) => {
         try {
-            const { scanId } = req.params;
-            const userId = req.user.user_id;
+            const { user_id: requesterId, accountType } = req.user;
+            const scanId = parseInt(req.params.scanId, 10);
 
-            const [rows] = await pool.execute(
-                `SELECT voice
-                 FROM OCR_SCANS
-                 WHERE ocr_id = ? AND user_id = ?`,
-                [scanId, userId]
-            );
-
-            if (rows.length === 0 || !rows[0].voice) {
-                return res.status(404).json({ error: 'Voice not found for this scan.' });
+            if (isNaN(scanId)) {
+                return res.status(400).json({ error: 'Invalid scanId' });
             }
 
-            const voiceBase64 = rows[0].voice.toString('base64');
+            if (accountType !== 'Guardian') {
+                return res.status(403).json({ error: 'Only Guardians can retrieve voice recordings.' });
+            }
 
-            res.json({ voice: voiceBase64 });
+            // 1) figure out who owns this scan
+            const [ownerRows] = await pool.execute(
+                `SELECT user_id FROM OCR_SCANS WHERE ocr_id = ?`,
+                [scanId]
+            );
+
+            if (!ownerRows.length) {
+                return res.status(404).json({ error: 'OCR scan not found' });
+            }
+            const ownerId = ownerRows[0].user_id;
+
+            // 2) check permissions
+            const [links] = await pool.execute(
+                `SELECT 1 FROM USER_GUARDIAN_LINK WHERE guardian_id = ? AND user_id = ?`,
+                [requesterId, ownerId]
+            );
+
+            if (links.length === 0) {
+                return res.status(403).json({ error: 'Not authorized to view this scan.' });
+            }
+
+            // 3) fetch the voice data
+            const [voiceRows] = await pool.execute(
+                `SELECT voice FROM OCR_SCANS WHERE ocr_id = ?`,
+                [scanId]
+            );
+
+            if (!voiceRows.length || !voiceRows[0].voice) {
+                return res.status(404).json({ error: 'No voice recording found for this scan.' });
+            }
+
+            // Send as base64 string
+            res.json({ voice: voiceRows[0].voice.toString('base64') });
+
         } catch (err) {
             next(err);
         }
-    }
+    },
 }

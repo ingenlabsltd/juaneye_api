@@ -3,7 +3,6 @@
 const express = require('express');
 const dotenv = require('dotenv');
 const cors = require('cors');
-const bodyParser = require('body-parser');
 
 const { auditLog } = require('./middleware/auditMiddleware');
 const authRoutes = require('./routes/authRoutes');
@@ -33,8 +32,6 @@ app.use((req, res, next) => {
     next();
 });
 
-
-app.use(bodyParser.json());
 
 // 1) Public authentication (no JWT needed)
 app.use('/api/auth', authRoutes);

@@ -108,7 +108,7 @@ const auditLog = async (req, res, next) => {
       method: req.method,
       request_body: JSON.stringify(requestBody),
       response_status: res.statusCode,
-      ip_address: req.ip,
+      ip_address: req.headers['x-forwarded-for'] || req.ip,
       user_agent: userAgent,
       changed_at: new Date()
     };

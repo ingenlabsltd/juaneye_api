@@ -25,9 +25,9 @@ router.put('/user/scans/:scanId', userController.updateScan);
 
 router.delete('/user/scans/:scanId', userController.deleteScan);
 
-router.put('/guardian/scans/:scanId/voice', userController.updateScanVoice);
+router.put('/user/guardian/scans/:scanId/voice', userController.updateScanVoice);
 
-router.get('/guardian/scans/:scanId/voice', userController.getScanVoice);
+router.get('/user/guardian/scans/:scanId/voice', userController.getScanVoice);
 
 router.post('/user/photo-upload', userController.photoUpload);
 

@@ -190,7 +190,7 @@ module.exports = {
      * Verifies the login OTP and returns a JWT.
      */
     verifyLoginOTP: async (req, res, next) => {
-        const { email, codeValue } = req.body;
+        const { email, codeValue, deviceInfo } = req.body;
         if (!email || !codeValue) {
             return res
                 .status(400)
@@ -237,7 +237,8 @@ module.exports = {
                     user_id:       user.user_id,
                     email:         user.email,
                     accountType:   user.accountType,
-                    isPremiumUser: user.isPremiumUser
+                    isPremiumUser: user.isPremiumUser,
+                    deviceInfo
                 },
                 process.env.JWT_SECRET,
                 { expiresIn: "2h" }

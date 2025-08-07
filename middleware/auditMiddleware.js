@@ -85,15 +85,8 @@ const auditLog = async (req, res, next) => {
       return 'FAIL';
     };
     
-    console.log('Audit Middleware - Incoming Request Body:', req.body);
-    console.log('Audit Middleware - Incoming User-Agent:', req.headers['user-agent']);
-    let { deviceModel, deviceType } = req.body;
-
-    if (!deviceModel || !deviceType) {
-        deviceModel = req.query.deviceModel;
-        deviceType = req.query.deviceType;
-    }
-    
+    const { deviceModel, deviceType } = req.deviceInfo || {};
+    console.log(req.deviceInfo)
     let userAgent = req.headers['user-agent'];
     if (deviceModel && deviceType) {
       userAgent = `${userAgent} (Device Model: ${deviceModel}, Device Type: ${deviceType})`;

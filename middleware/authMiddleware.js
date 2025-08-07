@@ -20,12 +20,13 @@ function verifyToken(req, res, next) {
     const token = authHeader.split(' ')[1];
     try {
         const payload = jwt.verify(token, JWT_SECRET);
-        // payload should have { user_id, email, accountType } if you signed it that way
+        // payload should have { user_id, email, accountType, deviceInfo }
         req.user = {
             user_id: payload.user_id,
             email: payload.email,
             accountType: payload.accountType
         };
+        req.deviceInfo = payload.deviceInfo;
         next();
     } catch (err) {
         return res.status(401).json({ error: 'Invalid or expired token' });

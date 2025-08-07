@@ -1591,4 +1591,67 @@ module.exports = {
             conn.release();
         }
     }
+,
+    /**
+     * @route PUT /api/user/scans/:scanId/voice
+     * @description Update the voice recording for an OCR scan.
+     * @access Private
+     */
+    updateScanVoice: async (req, res, next) => {
+        try {
+            const { scanId } = req.params;
+            const { voice } = req.body;
+            const userId = req.user.user_id;
+
+            if (!voice) {
+                return res.status(400).json({ error: 'Voice data is required.' });
+            }
+
+            const voiceBuffer = Buffer.from(voice, 'base64');
+
+            const [result] = await pool.execute(
+                `UPDATE OCR_SCANS
+                 SET voice = ?
+                 WHERE ocr_id = ? AND user_id = ?`,
+                [voiceBuffer, scanId, userId]
+            );
+
+            if (result.affectedRows === 0) {
+                return res.status(404).json({ error: 'Scan not found or not owned by user.' });
+            }
+
+            res.json({ message: 'Voice updated successfully' });
+        } catch (err) {
+            next(err);
+        }
+    },
+
+    /**
+     * @route GET /api/user/scans/:scanId/voice
+     * @description Get the voice recording for an OCR scan.
+     * @access Private
+     */
+    getScanVoice: async (req, res, next) => {
+        try {
+            const { scanId } = req.params;
+            const userId = req.user.user_id;
+
+            const [rows] = await pool.execute(
+                `SELECT voice
+                 FROM OCR_SCANS
+                 WHERE ocr_id = ? AND user_id = ?`,
+                [scanId, userId]
+            );
+
+            if (rows.length === 0 || !rows[0].voice) {
+                return res.status(404).json({ error: 'Voice not found for this scan.' });
+            }
+
+            const voiceBase64 = rows[0].voice.toString('base64');
+
+            res.json({ voice: voiceBase64 });
+        } catch (err) {
+            next(err);
+        }
+    }
 }
